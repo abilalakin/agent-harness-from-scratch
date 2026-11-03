@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "fpdf2>=2.9.0",
+    "mcp>=2.3,<3",
     "openai>=3.42.1",
     "openpyxl>=3.1.5",
     "pypdf>=6.21.4",
@@ -17,6 +18,7 @@ dependencies = [
 [project.scripts]
 harness = "harness.cli:main"
 make-data = "harness.practice_data:main"
+erp-mcp = "harness.mcp_server:main"
 
 [build-system]
 requires = ["uv_build>=0.11.23,<0.12.0"]

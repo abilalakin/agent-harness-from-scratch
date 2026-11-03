@@ -18,6 +18,14 @@ from harness.tools import Tool
 MAX_ROWS = 50
 QUERY_TIME_LIMIT_SECONDS = 10
 
+# Written for the model. Shared by the built-in tools below and the MCP server (mcp_server.py).
+DESCRIBE_TABLES_DESCRIPTION = "Show the tables of the ERP database (erp.db) and their columns. Call this before run_sql."
+RUN_SQL_DESCRIPTION = (
+    "Run one read-only SQLite query on the ERP database and get the rows back. "
+    "Call describe_tables first to see the column names. "
+    f"At most {MAX_ROWS} rows are shown, so filter or aggregate in SQL. Writes are refused."
+)
+
 
 def connect_read_only(db_path: Path) -> sqlite3.Connection:
     # Check first: connecting to a missing file would otherwise fail with a vague error.
@@ -66,16 +74,13 @@ def make_sql_tools(db_path: Path) -> list[Tool]:
     return [
         Tool(
             name="describe_tables",
-            description="Show the tables of the ERP database (erp.db) and their columns. Call this before run_sql.",
+            description=DESCRIBE_TABLES_DESCRIPTION,
             parameters={"type": "object", "properties": {}},
             fn=partial(describe_tables, db_path),
         ),
         Tool(
             name="run_sql",
-            description=(
-                "Run one read-only SQLite query on the ERP database and get the rows back. "
-                f"At most {MAX_ROWS} rows are shown, so filter or aggregate in SQL. Writes are refused."
-            ),
+            description=RUN_SQL_DESCRIPTION,
             parameters={
                 "type": "object",
                 "properties": {"query": {"type": "string", "description": "One SQLite SELECT statement"}},

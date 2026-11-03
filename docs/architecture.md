@@ -20,6 +20,12 @@ flowchart LR
     Runner -. "result, cut by cap_output<br/>(3000 chars), as a tool message" .-> Agent
     Agent -. "final answer<br/>(or stop after max_steps)" .-> CLI
 
+    subgraph ErpMcp["erp-mcp: separate process (mcp_server.py)"]
+        McpTools["MCP tools<br/>describe_tables, run_sql<br/>(reuses sql_tools.py)"]
+    end
+    McpTools -- "same locks:<br/>mode=ro, no ATTACH, 10 s" --> DB
+    AnyClient(["Claude Code, MCP Inspector,<br/>any MCP client"]) -- "MCP: JSON-RPC over stdio<br/>initialize, tools/list, tools/call" --> McpTools
+
     MakeData["uv run make-data<br/>practice_data.py, seed 42"] --> Data[("data/<br/>erp.db, invoices/*.pdf,<br/>contracts/*.pdf, legacy/*.xlsx")]
 ```
 
@@ -35,3 +41,4 @@ The agent loops between the model and the tools until the model answers without 
 - **Step 3a:** Practice data. `uv run make-data` writes a fake ERP database, invoice PDFs, a contract PDF and a messy Excel export into `data/`. Nothing reads it yet.
 - **Step 3b:** File tools. Four tools read text, PDF and Excel files. Every path goes through `safe_path`, so nothing outside `data/` can be opened. `run_tool_call` now cuts every result to 3000 characters, so one big file can't fill the context.
 - **Step 3c:** SQL tools. `describe_tables` shows the table layout, `run_sql` runs one query. The database is opened read-only and can't attach other files, so writes fail inside SQLite itself. Results stop at 50 rows.
+- **Step 4a:** An MCP server, `erp-mcp`. It offers the same two SQL tools to any MCP client, as a separate program talking JSON-RPC over stdin/stdout. Our harness doesn't use it yet.
