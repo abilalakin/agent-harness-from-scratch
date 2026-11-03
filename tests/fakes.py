@@ -8,7 +8,7 @@ from harness.model import Message
 class FakeModel:
     """Returns (or raises) the given replies in order, and records every call."""
 
-    def __init__(self, replies: list[Message | Exception]):
+    def __init__(self, replies: list[Message | BaseException]):
         self.replies = list(replies)
         self.calls: list[dict] = []
 
@@ -16,6 +16,6 @@ class FakeModel:
         # Deep copy: the agent keeps changing its list after the call.
         self.calls.append({"messages": copy.deepcopy(messages), "tools": tools})
         reply = self.replies.pop(0)
-        if isinstance(reply, Exception):
+        if isinstance(reply, BaseException):  # BaseException also covers Ctrl+C
             raise reply
         return reply

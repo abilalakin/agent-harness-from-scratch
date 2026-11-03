@@ -12,6 +12,8 @@ class Settings:
     model: str = "qwen3:8b"
     # Ollama ignores the key, but the openai client refuses to start without one.
     api_key: str = "ollama"
+    # How many model calls one question may use before the agent gives up.
+    max_steps: int = 10
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -22,4 +24,5 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         base_url=env.get("HARNESS_BASE_URL", default.base_url),
         model=env.get("HARNESS_MODEL", default.model),
         api_key=env.get("HARNESS_API_KEY", default.api_key),
+        max_steps=int(env.get("HARNESS_MAX_STEPS", default.max_steps)),
     )

@@ -12,3 +12,8 @@ def test_env_overrides():
         {"HARNESS_BASE_URL": "http://x/v1", "HARNESS_MODEL": "m", "HARNESS_API_KEY": "k"}
     )
     assert (s.base_url, s.model, s.api_key) == ("http://x/v1", "m", "k")
+
+
+def test_max_steps_default_and_override():
+    assert load_settings({}).max_steps == 10
+    assert load_settings({"HARNESS_MAX_STEPS": "3"}).max_steps == 3

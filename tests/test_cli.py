@@ -51,3 +51,11 @@ def test_repl_reset_clears_history():
     out = run(agent, ["hi", "/reset", "/exit"])
     assert any("(history cleared)" in line for line in out)
     assert len(agent.messages) == 1
+
+
+def test_repl_ctrl_c_while_model_answers_stops_that_question_only():
+    agent = Agent(FakeModel([KeyboardInterrupt(), reply("still here")]))
+    out = run(agent, ["slow question", "next", "/exit"])
+    assert any("(stopped)" in line for line in out)
+    assert any("still here" in line for line in out)
+    assert [m["role"] for m in agent.messages] == ["system", "user", "assistant"]
