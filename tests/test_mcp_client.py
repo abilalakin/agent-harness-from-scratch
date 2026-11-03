@@ -1,8 +1,10 @@
+import asyncio
 import sys
 import time
 
 import pytest
 from mcp import StdioServerParameters
+from mcp.server.mcpserver import MCPServer
 
 from harness.mcp_client import McpConnection, make_mcp_tools
 from harness.mcp_server import build_server
@@ -77,3 +79,32 @@ def test_calls_after_close_fail_clearly(data_dir):
     connection.close()  # a second close is harmless
     with pytest.raises(RuntimeError, match="closed"):
         connection.list_tools()
+
+
+def test_startup_error_names_the_real_cause(tmp_path):
+    params = StdioServerParameters(command=sys.executable, args=["-c", "import sys; sys.exit(3)"])
+    with open(tmp_path / "server.log", "w") as log, pytest.raises(RuntimeError) as error:
+        McpConnection(params, errlog=log)
+    assert "Connection closed" in str(error.value)
+    assert "TaskGroup" not in str(error.value)
+
+
+def test_call_that_hangs_gives_a_clear_error_and_is_cancelled():
+    server = MCPServer("slow")
+
+    @server.tool()
+    async def slow() -> str:
+        """Never answers in time."""
+        await asyncio.sleep(30)
+        return "too late"
+
+    connection = McpConnection(server, timeout=0.5)
+    try:
+        start = time.monotonic()
+        with pytest.raises(RuntimeError, match="did not answer within 0.5 s"):
+            connection.call_tool("slow", {})
+        assert time.monotonic() - start < 2
+    finally:
+        start = time.monotonic()
+        connection.close()
+        assert time.monotonic() - start < 2  # the hung call was cancelled, so close() doesn't wait for it

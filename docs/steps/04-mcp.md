@@ -101,7 +101,8 @@ One rule from the library shaped the code: **a connection must be opened and clo
 
 Two more details you'll see in `mcp_client.py`:
 
-- **Fail fast.** If the server dies at startup, the owner task ends early. `__init__` notices within 0.1 s and raises `MCP server failed to start: ...`, instead of waiting 30 s for a connection that will never come.
+- **Fail fast, and say why.** If the server dies at startup, the owner task ends early. `__init__` notices within 0.1 s and raises `MCP server failed to start: Connection closed`, instead of waiting 30 s for a connection that will never come. asyncio first wraps that error in groups (`unhandled errors in a TaskGroup (1 sub-exception)`), which tells you nothing, so `_root_cause` unwraps it. The server's own log in `logs/mcp-erp.log` has the details.
+- **A call that hangs.** Each call waits at most 30 s. Then the harness cancels the request on the background loop too, and the model gets `MCP server did not answer within 30 s`. The first version gave it an empty error (`failed: ` and nothing more), because Python's `TimeoutError` has no message. The model can't act on silence.
 - **Clean up.** `close()` stops the task (which ends the server process), stops the loop, waits for the thread, and closes the loop. The first version forgot the last step, and only a test run with warnings switched on showed it: `ResourceWarning: unclosed event loop`.
 
 ### Who checks the arguments now

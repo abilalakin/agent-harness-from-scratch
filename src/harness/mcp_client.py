@@ -51,7 +51,7 @@ class McpConnection:
         while not self._connected.wait(0.1):
             waited += 0.1
             if self._owner.done() or waited >= timeout:
-                error = self._owner.exception() if self._owner.done() else "timed out"
+                error = _root_cause(self._owner.exception()) if self._owner.done() else "timed out"
                 self._closed = True
                 self._stop_loop()
                 raise RuntimeError(f"MCP server failed to start: {error}")
@@ -79,7 +79,12 @@ class McpConnection:
         if self._closed:
             coro.close()  # never started; close it so Python doesn't warn
             raise RuntimeError("MCP connection is closed")
-        return asyncio.run_coroutine_threadsafe(coro, self._loop).result(self.timeout)
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        try:
+            return future.result(self.timeout)
+        except TimeoutError:
+            future.cancel()  # stop waiting on the background loop too, not only here
+            raise RuntimeError(f"MCP server did not answer within {self.timeout:g} s") from None
 
     def list_tools(self) -> list[McpTool]:
         return self._run(self._client.list_tools()).tools
@@ -95,6 +100,14 @@ class McpConnection:
         self._loop.call_soon_threadsafe(self._stop.set)
         self._owner.result(self.timeout)  # the owner task closes the connection
         self._stop_loop()
+
+
+def _root_cause(error: BaseException) -> BaseException:
+    """asyncio wraps failures in ExceptionGroups ("unhandled errors in a TaskGroup").
+    Unwrap them to the first real error, like "Connection closed", which says what happened."""
+    while isinstance(error, BaseExceptionGroup) and error.exceptions:
+        error = error.exceptions[0]
+    return error
 
 
 def make_mcp_tools(connection: McpConnection, server_name: str) -> list[Tool]:
