@@ -7,7 +7,8 @@ from harness.tools import Tool, run_tool_call
 
 SYSTEM_PROMPT = (
     "You are a helpful assistant. Answer briefly. "
-    "Use the tools when they help. If a tool returns an error, fix the arguments and try again."
+    "Use the tools when they help. If a tool returns an error, fix the arguments and try again. "
+    "Practice data lives in a data folder: files and an ERP database. Look before you guess."
 )
 
 

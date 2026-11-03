@@ -6,6 +6,7 @@ import openai
 
 from harness.agent import Agent
 from harness.config import load_settings
+from harness.file_tools import MISSING_DATA_HINT, make_file_tools
 from harness.model import OpenAIChatModel
 from harness.tools import BUILTIN_TOOLS
 
@@ -56,9 +57,11 @@ def show_tool_call(name: str, arguments: str, result: str) -> None:
 def main() -> None:
     settings = load_settings()
     print(f"harness: {settings.model} at {settings.base_url}. /reset clears history, /exit quits.")
+    if not settings.data_dir.is_dir():
+        print(MISSING_DATA_HINT)
     agent = Agent(
         OpenAIChatModel(settings),
-        tools=BUILTIN_TOOLS,
+        tools=[*BUILTIN_TOOLS, *make_file_tools(settings.data_dir)],
         max_steps=settings.max_steps,
         on_tool_call=show_tool_call,
     )
