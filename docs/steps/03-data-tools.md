@@ -100,6 +100,8 @@ uv run harness
   - it called "Blue Sky Ltd" and "Blue Sky GmbH" duplicates. They are two different companies. The real duplicates (exact repeats, `Atlas Limited` vs `Atlas Ltd`) it missed.
 - **"read ../../.ssh/id_ed25519"**: the model **refused by itself and never called a tool**. Good manners, but not security. A different model, or a cleverer prompt, might call `read_text` anyway. The check in `safe_path` is what actually protects the file, and `tests/test_file_tools.py` proves it works whatever the model decides.
 
+**Known gap until step 5:** the cut note says "ask for fewer rows", but `read_excel` has no way to ask for later rows. So rows 42 to 56 of the export can't be reached at all yet. Step 5 adds paging.
+
 Two lessons for later steps: a model doesn't notice a cut result unless it's told loudly (step 5), and spotting duplicates by eye is not reliable (step 7 computes a score instead).
 
 ## 3c: SQL tools
@@ -113,6 +115,11 @@ So `sql_tools.py` doesn't read the query at all. It makes the database itself re
 1. **`mode=ro`**: the file is opened read-only. SQLite rejects every write with `attempt to write a readonly database`, however the query is written.
 2. **No `ATTACH`**: `setlimit(SQLITE_LIMIT_ATTACHED, 0)` stops a query from opening (or creating) a second database file next to it.
 3. **One statement per call**: Python's `sqlite3` refuses `SELECT 1; DELETE ...` on its own.
+4. **A time limit**: a progress handler stops any query after 10 seconds with `interrupted`. Without it, a query like `WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c) SELECT COUNT(*) FROM c` runs forever, and Ctrl+C can't stop it, because Python doesn't get control back while SQLite is working.
+
+The `ATTACH` limit also blocks `VACUUM INTO 'file'`, which would otherwise write a full copy of the database anywhere on disk.
+
+**A bug the review found:** the first version built the connection string as `f"file:{db_path}?mode=ro"`. That string is a URI, where `#` and `?` have special meanings. With a data folder named `my#proj`, SQLite read the path as `my`, dropped `?mode=ro`, and opened a *different, writable* file. Now the path goes through `Path.as_uri()`, which escapes those characters, and a test uses a folder named `my#proj?x`. The lesson: a lock is only as good as the string that turns it on.
 
 This is the same idea as `safe_path` in 3b: the guard sits where the model can't route around it.
 

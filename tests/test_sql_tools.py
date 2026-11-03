@@ -2,6 +2,8 @@ import sqlite3
 
 import pytest
 
+from harness import sql_tools
+from harness.practice_data import make_all
 from harness.sql_tools import MAX_ROWS, describe_tables, make_sql_tools, run_sql
 from harness.tools import run_tool_call
 
@@ -70,3 +72,21 @@ def test_write_error_reaches_model_as_text(db_path):
         tools, {"id": "c1", "type": "function", "function": {"name": "run_sql", "arguments": '{"query": "DELETE FROM orders"}'}}
     )
     assert out.startswith("Error: tool 'run_sql' failed:") and "readonly" in out
+
+
+def test_special_characters_in_path_keep_read_only(tmp_path):
+    # SQLite reads the path as a URI, where "#" and "?" mean something. They must not drop mode=ro.
+    data = tmp_path / "my#proj?x"
+    make_all(data)
+    db = data / "erp.db"
+    assert run_sql(db, "SELECT COUNT(*) AS n FROM customers").splitlines()[1] == "50"
+    with pytest.raises(sqlite3.OperationalError, match="readonly"):
+        run_sql(db, "CREATE TABLE pwn (a)")
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["my#proj?x"]  # no stray database file
+
+
+def test_runaway_query_is_stopped(db_path, monkeypatch):
+    monkeypatch.setattr(sql_tools, "QUERY_TIME_LIMIT_SECONDS", 0.5)
+    endless = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT COUNT(*) FROM c"
+    with pytest.raises(sqlite3.OperationalError, match="interrupted"):
+        run_sql(db_path, endless)

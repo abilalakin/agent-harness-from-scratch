@@ -7,6 +7,7 @@ text of each query (easy to get wrong), the database itself refuses to change:
 """
 
 import sqlite3
+import time
 from contextlib import closing
 from functools import partial
 from pathlib import Path
@@ -15,14 +16,22 @@ from harness.file_tools import MISSING_DATA_HINT
 from harness.tools import Tool
 
 MAX_ROWS = 50
+QUERY_TIME_LIMIT_SECONDS = 10
 
 
 def connect_read_only(db_path: Path) -> sqlite3.Connection:
     # Check first: connecting to a missing file would otherwise fail with a vague error.
     if not db_path.is_file():
         raise ValueError(MISSING_DATA_HINT)
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    con.setlimit(sqlite3.SQLITE_LIMIT_ATTACHED, 0)
+    # The path goes into a URI, where "#", "?" and "%" have special meanings. as_uri() escapes
+    # them. Without it, a folder like "my#proj" would cut off "?mode=ro" and open a writable file.
+    con = sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)
+    con.setlimit(sqlite3.SQLITE_LIMIT_ATTACHED, 0)  # also blocks VACUUM INTO, which writes a copy
+
+    # Stop queries that run too long. SQLite calls the handler every 10,000 steps.
+    # Returning True makes it abort with "interrupted", which reaches the model as an error.
+    deadline = time.monotonic() + QUERY_TIME_LIMIT_SECONDS
+    con.set_progress_handler(lambda: time.monotonic() > deadline, 10_000)
     return con
 
 
