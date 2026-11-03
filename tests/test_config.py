@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from harness.config import load_settings
 
 
@@ -24,3 +26,10 @@ def test_max_steps_default_and_override():
 def test_data_dir_default_and_override():
     assert load_settings({}).data_dir == Path("data")
     assert load_settings({"HARNESS_DATA_DIR": "/tmp/x"}).data_dir == Path("/tmp/x")
+
+
+def test_sql_via_default_override_and_bad_value():
+    assert load_settings({}).sql_via == "builtin"
+    assert load_settings({"HARNESS_SQL_VIA": "mcp"}).sql_via == "mcp"
+    with pytest.raises(ValueError, match="builtin or mcp"):
+        load_settings({"HARNESS_SQL_VIA": "both"})

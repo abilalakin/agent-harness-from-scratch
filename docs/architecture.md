@@ -15,7 +15,10 @@ flowchart LR
     Runner --> T2[calculate]
     Runner --> FT["file tools<br/>list_files, read_text,<br/>read_pdf, read_excel"]
     FT -- "safe_path:<br/>inside data/ only" --> Data
-    Runner --> ST["SQL tools<br/>describe_tables, run_sql<br/>max 50 rows"]
+    Runner -- "HARNESS_SQL_VIA=builtin<br/>(default)" --> ST["SQL tools<br/>describe_tables, run_sql<br/>max 50 rows"]
+    Runner -- "HARNESS_SQL_VIA=mcp" --> MT["MCP tools<br/>mcp__erp__describe_tables,<br/>mcp__erp__run_sql"]
+    MT --> Conn["McpConnection<br/>background thread,<br/>asyncio loop"]
+    Conn -- "MCP over stdio<br/>(starts the subprocess)" --> McpTools
     ST -- "mode=ro,<br/>no ATTACH" --> DB[("data/erp.db<br/>read-only")]
     Runner -. "result, cut by cap_output<br/>(3000 chars), as a tool message" .-> Agent
     Agent -. "final answer<br/>(or stop after max_steps)" .-> CLI
@@ -29,7 +32,7 @@ flowchart LR
     MakeData["uv run make-data<br/>practice_data.py, seed 42"] --> Data[("data/<br/>erp.db, invoices/*.pdf,<br/>contracts/*.pdf, legacy/*.xlsx")]
 ```
 
-The file tools read the files in `data/`. The SQL tools read `erp.db`, and the database itself refuses every write.
+The file tools read the files in `data/`. The SQL tools read `erp.db`, and the database itself refuses every write. They reach the database one of two ways: built in, inside the harness process, or through the `erp-mcp` server, which the harness starts as a subprocess. To the agent, both look like normal tools.
 
 The agent loops between the model and the tools until the model answers without asking for a tool, or until `max_steps` model calls are used up.
 
@@ -42,3 +45,4 @@ The agent loops between the model and the tools until the model answers without 
 - **Step 3b:** File tools. Four tools read text, PDF and Excel files. Every path goes through `safe_path`, so nothing outside `data/` can be opened. `run_tool_call` now cuts every result to 3000 characters, so one big file can't fill the context.
 - **Step 3c:** SQL tools. `describe_tables` shows the table layout, `run_sql` runs one query. The database is opened read-only and can't attach other files, so writes fail inside SQLite itself. Results stop at 50 rows.
 - **Step 4a:** An MCP server, `erp-mcp`. It offers the same two SQL tools to any MCP client, as a separate program talking JSON-RPC over stdin/stdout. Our harness doesn't use it yet.
+- **Step 4b:** The harness as an MCP client. With `HARNESS_SQL_VIA=mcp` it starts `erp-mcp`, asks for its tools, and wraps each one as a normal `Tool` named `mcp__erp__<tool>`. `McpConnection` runs the async MCP client on a background thread, so the rest of the harness stays synchronous. The agent loop didn't change.

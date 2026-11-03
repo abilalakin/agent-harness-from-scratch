@@ -1,12 +1,17 @@
 """The terminal program: read a line, ask the agent, print the answer."""
 
+import sys
 from collections.abc import Callable
+from pathlib import Path
 
 import openai
+from mcp import StdioServerParameters
 
 from harness.agent import Agent
 from harness.config import load_settings
 from harness.file_tools import MISSING_DATA_HINT, make_file_tools
+from harness.mcp_client import McpConnection, make_mcp_tools
+from harness.mcp_server import SERVER_NAME
 from harness.model import OpenAIChatModel
 from harness.sql_tools import make_sql_tools
 from harness.tools import BUILTIN_TOOLS
@@ -55,15 +60,42 @@ def show_tool_call(name: str, arguments: str, result: str) -> None:
     print(f"  [tool] {name}({arguments}) -> {short}")
 
 
+def start_erp_mcp_server(db_path: Path) -> McpConnection:
+    """Start erp-mcp as a subprocess. Its log lines go to logs/mcp-erp.log, not your terminal."""
+    Path("logs").mkdir(exist_ok=True)
+    errlog = open(Path("logs") / f"mcp-{SERVER_NAME}.log", "a")
+    command = [sys.executable, "-m", "harness.mcp_server", "--db", str(db_path.resolve())]
+    return McpConnection(StdioServerParameters(command=command[0], args=command[1:]), errlog=errlog)
+
+
 def main() -> None:
     settings = load_settings()
     print(f"harness: {settings.model} at {settings.base_url}. /reset clears history, /exit quits.")
     if not settings.data_dir.is_dir():
         print(MISSING_DATA_HINT)
+
+    db_path = settings.data_dir / "erp.db"
+    connection = None
+    if settings.sql_via == "mcp":
+        try:
+            connection = start_erp_mcp_server(db_path)
+        except RuntimeError as e:
+            print(f"Error: {e}. See logs/mcp-{SERVER_NAME}.log")
+            sys.exit(1)
+        sql_tools = make_mcp_tools(connection, SERVER_NAME)
+        print(f"SQL tools: from the MCP server '{SERVER_NAME}' ({', '.join(t.name for t in sql_tools)})")
+    else:
+        sql_tools = make_sql_tools(db_path)
+        print("SQL tools: built in (set HARNESS_SQL_VIA=mcp to use the MCP server)")
+
     agent = Agent(
         OpenAIChatModel(settings),
-        tools=[*BUILTIN_TOOLS, *make_file_tools(settings.data_dir), *make_sql_tools(settings.data_dir / "erp.db")],
+        tools=[*BUILTIN_TOOLS, *make_file_tools(settings.data_dir), *sql_tools],
         max_steps=settings.max_steps,
         on_tool_call=show_tool_call,
     )
-    run_repl(agent)
+    try:
+        run_repl(agent)
+    finally:
+        if connection:
+            connection.close()  # ends the server process too

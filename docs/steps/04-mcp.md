@@ -69,3 +69,77 @@ Then, in Claude Code: "use the erp tools: which product has sold the most units?
 ```bash
 npx @modelcontextprotocol/inspector uv run erp-mcp
 ```
+
+## 4b: The harness as an MCP client
+
+### What this part teaches
+
+**To the model, an MCP tool is just a tool.** With `HARNESS_SQL_VIA=mcp`, the harness starts `erp-mcp`, asks it `tools/list`, and wraps each tool it gets back as a normal `Tool` from step 2: same name, description and JSON Schema, plus a function that sends `tools/call`. The agent loop in `agent.py` didn't change by a single line. That's the point of MCP: the agent doesn't care where a tool lives.
+
+```bash
+HARNESS_SQL_VIA=mcp uv run harness
+```
+
+### The names: `mcp__erp__run_sql`
+
+Both paths offer a `run_sql`. If both were loaded, the model would see two tools with the same name. So MCP tools get a prefix, `mcp__<server>__<tool>`. Claude Code uses the same convention, which is why it showed your tools as `mcp__erp__run_sql` in 4a.
+
+### The bridge: sync harness, async library
+
+The `mcp` library is built on asyncio. The harness is plain synchronous code. Rewriting the agent loop as async would touch every file. Instead, `McpConnection` gives the async client its own thread:
+
+```
+harness (main thread)                    background thread (asyncio event loop)
+conn.call_tool("run_sql", {...})  --->   client.call_tool(...)  ---> erp-mcp process
+      ... waits ...                                              <--- reply
+gets the result                   <---
+```
+
+`asyncio.run_coroutine_threadsafe(coro, loop).result(timeout)` is the whole trick: hand a job to the other thread's loop, then wait for the answer.
+
+One rule from the library shaped the code: **a connection must be opened and closed by the same asyncio task.** The first try opened it in one call and closed it in another, and crashed with `Attempted to exit cancel scope in a different task`. So `_own_connection` is one long-lived task. It opens the connection, waits until `close()` sets a stop event, then closes it. The calls run in their own short tasks beside it.
+
+Two more details you'll see in `mcp_client.py`:
+
+- **Fail fast.** If the server dies at startup, the owner task ends early. `__init__` notices within 0.1 s and raises `MCP server failed to start: ...`, instead of waiting 30 s for a connection that will never come.
+- **Clean up.** `close()` stops the task (which ends the server process), stops the loop, waits for the thread, and closes the loop. The first version forgot the last step, and only a test run with warnings switched on showed it: `ResourceWarning: unclosed event loop`.
+
+### Who checks the arguments now
+
+For built-in tools, `run_tool_call` checks the model's arguments against the Python function. MCP tools take `**arguments`, so that check lets everything through, and the **server** checks them against its schema instead. A missing `query` comes back as the server's validation error, and the model reads it the same way as before.
+
+### What we saw
+
+Same question, "which product has sold the most units?", both ways:
+
+| | built in | MCP |
+|---|---|---|
+| Tool calls | `describe_tables`, `run_sql` | `mcp__erp__describe_tables`, `mcp__erp__run_sql` |
+| Answer | Fire extinguisher, 191 units (correct) | Fire extinguisher, 191 units (correct) |
+| Whole run | 33 s | 31 s |
+| Server start | none | about 0.8 s |
+| One `run_sql` call | 0.08 ms | 4 ms |
+
+The extra process costs almost nothing you'd notice. The model's thinking takes nearly all the time. Also: this time Qwen3 called `describe_tables` **first**, both ways. In step 3 it guessed column names three times. The only change was one sentence in the `run_sql` description: "Call describe_tables first to see the column names."
+
+### When to use MCP and when not
+
+**Use MCP** when the same tools should work in several agents (your harness, Claude Code, Cursor), when the tool is written in another language, or when it runs on another machine or needs its own permissions.
+
+**Keep a tool built in** when only this harness uses it. It's one process, there's nothing to start or shut down, calls are faster, and errors are easier to follow.
+
+### Files to read, in order
+
+1. `src/harness/mcp_client.py`: the comment at the top, then `McpConnection`, then `make_mcp_tools`.
+2. `src/harness/cli.py`: `start_erp_mcp_server` and the `sql_via` switch in `main`.
+3. `tests/test_mcp_client.py`: a server that dies at startup, errors crossing the protocol, calls after `close()`.
+
+### Things to try
+
+```bash
+HARNESS_SQL_VIA=mcp uv run harness
+```
+
+- Ask the same question as with `uv run harness` and compare the `[tool]` lines.
+- While it runs, in another terminal: `ps -eo pid,args | grep "[h]arness.mcp_server"` shows the server process. After `/exit`, it's gone.
+- `tail -f logs/mcp-erp.log` shows the server's own log, which stays out of your chat.
