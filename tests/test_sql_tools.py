@@ -1,0 +1,72 @@
+import sqlite3
+
+import pytest
+
+from harness.sql_tools import MAX_ROWS, describe_tables, make_sql_tools, run_sql
+from harness.tools import run_tool_call
+
+
+@pytest.fixture
+def db_path(data_dir):
+    return data_dir / "erp.db"
+
+
+def test_describe_tables_shows_every_table(db_path):
+    out = describe_tables(db_path)
+    for table in ["customers", "products", "orders", "order_lines", "invoices"]:
+        assert f"CREATE TABLE {table}" in out
+
+
+def test_select_returns_header_and_rows(db_path):
+    lines = run_sql(db_path, "SELECT id, name FROM customers ORDER BY id LIMIT 2").splitlines()
+    assert lines[0] == "id | name" and len(lines) == 3
+
+
+def test_empty_result_says_no_rows(db_path):
+    assert run_sql(db_path, "SELECT * FROM customers WHERE id = -1") == "(no rows)"
+
+
+def test_more_than_max_rows_is_cut_with_hint(db_path):
+    out = run_sql(db_path, "SELECT id FROM orders")
+    assert len(out.splitlines()) == 1 + MAX_ROWS + 1
+    assert "Use WHERE, GROUP BY or LIMIT" in out
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "DELETE FROM customers",
+        "UPDATE customers SET name = 'x'",
+        "DROP TABLE customers",
+        "INSERT INTO products (sku) VALUES ('x')",
+    ],
+)
+def test_writes_are_refused_and_data_unchanged(db_path, query):
+    with pytest.raises(sqlite3.OperationalError, match="readonly"):
+        run_sql(db_path, query)
+    assert run_sql(db_path, "SELECT COUNT(*) AS n FROM customers").splitlines()[1] == "50"
+
+
+def test_two_statements_are_refused(db_path):
+    with pytest.raises(sqlite3.ProgrammingError):
+        run_sql(db_path, "SELECT 1; DELETE FROM customers")
+
+
+def test_attach_is_refused(db_path, tmp_path):
+    with pytest.raises(sqlite3.OperationalError):
+        run_sql(db_path, f"ATTACH DATABASE '{tmp_path / 'new.db'}' AS x")
+    assert not (tmp_path / "new.db").exists()
+
+
+def test_missing_database_gives_make_data_hint(tmp_path):
+    with pytest.raises(ValueError, match="uv run make-data"):
+        run_sql(tmp_path / "erp.db", "SELECT 1")
+    assert not (tmp_path / "erp.db").exists()  # opening read-only must not create an empty file
+
+
+def test_write_error_reaches_model_as_text(db_path):
+    tools = {t.name: t for t in make_sql_tools(db_path)}
+    out = run_tool_call(
+        tools, {"id": "c1", "type": "function", "function": {"name": "run_sql", "arguments": '{"query": "DELETE FROM orders"}'}}
+    )
+    assert out.startswith("Error: tool 'run_sql' failed:") and "readonly" in out

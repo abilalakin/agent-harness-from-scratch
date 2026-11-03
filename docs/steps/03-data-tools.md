@@ -101,3 +101,50 @@ uv run harness
 - **"read ../../.ssh/id_ed25519"**: the model **refused by itself and never called a tool**. Good manners, but not security. A different model, or a cleverer prompt, might call `read_text` anyway. The check in `safe_path` is what actually protects the file, and `tests/test_file_tools.py` proves it works whatever the model decides.
 
 Two lessons for later steps: a model doesn't notice a cut result unless it's told loudly (step 5), and spotting duplicates by eye is not reliable (step 7 computes a score instead).
+
+## 3c: SQL tools
+
+### What this part teaches
+
+**Lock the data, not the query.** The model writes the SQL, so the SQL can't be trusted. One idea is to check the query text: allow it only if it starts with `SELECT`. That breaks fast. `WITH x AS (DELETE ...)`, comments, odd spacing and SQLite's many statement types all slip past text checks.
+
+So `sql_tools.py` doesn't read the query at all. It makes the database itself refuse:
+
+1. **`mode=ro`**: the file is opened read-only. SQLite rejects every write with `attempt to write a readonly database`, however the query is written.
+2. **No `ATTACH`**: `setlimit(SQLITE_LIMIT_ATTACHED, 0)` stops a query from opening (or creating) a second database file next to it.
+3. **One statement per call**: Python's `sqlite3` refuses `SELECT 1; DELETE ...` on its own.
+
+This is the same idea as `safe_path` in 3b: the guard sits where the model can't route around it.
+
+### Look before you query
+
+`describe_tables` returns the `CREATE TABLE` statements. Without them, a model guesses column names (`customer_name`, `amount`, `is_paid`) and gets errors. The `run_sql` description says to call `describe_tables` first.
+
+### At most 50 rows
+
+`run_sql` asks SQLite for 51 rows. If the 51st arrives, it shows 50 and adds `...[more rows not shown, only the first 50. Use WHERE, GROUP BY or LIMIT.]`. The database does the counting and grouping, and the model only gets the answer. That's far cheaper than pulling every row into the context.
+
+### Files to read, in order
+
+1. `src/harness/sql_tools.py`: `connect_read_only` first, then `run_sql`.
+2. `tests/test_sql_tools.py`: every write attempt that must fail, and the check that the data is unchanged afterwards.
+
+### Things to try
+
+```bash
+uv run harness
+```
+
+- "which 3 customers have the most unpaid invoices?" (correct answer: Blue Sky Ltd 4, Harbor Trading 3, then a three-way tie at 2: Summit Industries, Polaris Aero, Falcon Aero)
+- "delete all cancelled orders": refused by SQLite.
+- "does every invoice PDF match the database?" (correct answer: no, INV-2026-0003's PDF is 100.00 EUR higher)
+
+### What we saw with qwen3:8b
+
+- **"which 3 customers have the most unpaid invoices?"**: it **guessed column names first** (`invoice_id`, `status`, `customer_id`) and got three errors, then called `describe_tables`, then needed one more try to join through `orders`. The final answer was right: Blue Sky Ltd 4, Harbor Trading 3, Summit Industries 2. Two lessons:
+  - The tool description said "call describe_tables first". The model didn't. **The error messages are what got it there.** `no such column: i.status` is a hint the model can act on.
+  - `LIMIT 3` hid a **three-way tie** at 2 unpaid invoices (Summit Industries, Polaris Aero, Falcon Aero). The SQL was "correct", and the answer was still misleading.
+- **"delete all cancelled orders"**: the model **refused by itself** and never called `run_sql`. Same as the SSH key in 3b: manners, not security. `tests/test_sql_tools.py` shows the database refuses even when the query does arrive.
+- **"does every invoice PDF match the database?"**: it **never compared a single total**. It listed the 5 PDFs, ran `SELECT invoice_number FROM invoices`, got the first 50 rows plus the "more rows not shown" note, and then said the database "contains 50 invoices". There are 112. It misread the cut as the total, and answered a different question ("are there PDFs for every invoice?").
+
+That last one is the problem step 5 is about. The model needs to work through several files and queries, keep the right numbers, and notice when it's seeing only part of the data. Today a cut result looks the same to it as a complete one.
