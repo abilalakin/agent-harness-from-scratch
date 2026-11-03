@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from harness.config import load_settings
 
 
@@ -17,3 +19,8 @@ def test_env_overrides():
 def test_max_steps_default_and_override():
     assert load_settings({}).max_steps == 10
     assert load_settings({"HARNESS_MAX_STEPS": "3"}).max_steps == 3
+
+
+def test_data_dir_default_and_override():
+    assert load_settings({}).data_dir == Path("data")
+    assert load_settings({"HARNESS_DATA_DIR": "/tmp/x"}).data_dir == Path("/tmp/x")
