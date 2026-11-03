@@ -76,7 +76,7 @@ Each step ends with: code that runs, passing tests, an updated diagram, and a st
    - time and memory limits,
    - the container is thrown away after each run.
 7. **Human in the loop.** The customer migration task (details below).
-8. **Later, any order:** memory across sessions, subagents, a rules file (like `CLAUDE.md`) that the harness loads into its system prompt. Each gets its own short design when we reach it.
+8. **Later, any order:** memory across sessions, subagents, a rules file (like `AGENTS.md`) that the harness loads into its system prompt. Each gets its own short design when we reach it.
 
 ### Step 7 in more detail
 

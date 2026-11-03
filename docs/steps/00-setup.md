@@ -19,7 +19,7 @@ We set `OLLAMA_CONTEXT_LENGTH=8192`. The model's cache grows with this number, a
 ## Files to read
 
 1. `src/harness/config.py`: where the model lives and which model to use. Change them with `HARNESS_BASE_URL`, `HARNESS_MODEL` and `HARNESS_API_KEY`.
-2. `CLAUDE.md`: the rules Claude follows in this repo.
+2. `AGENTS.md`: the rules any coding agent follows in this repo. `CLAUDE.md` only imports it, for Claude Code.
 
 ## Things to try
 
