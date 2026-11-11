@@ -28,10 +28,15 @@ def test_empty_result_says_no_rows(db_path):
     assert run_sql(db_path, "SELECT * FROM customers WHERE id = -1") == "(no rows)"
 
 
-def test_more_than_max_rows_is_cut_with_hint(db_path):
-    out = run_sql(db_path, "SELECT id FROM orders")
-    assert len(out.splitlines()) == 1 + MAX_ROWS + 1
-    assert "Use WHERE, GROUP BY or LIMIT" in out
+def test_more_than_max_rows_says_total_first(db_path):
+    lines = run_sql(db_path, "SELECT id FROM orders").splitlines()
+    assert lines[0] == "[showing rows 1-50 of 200. Use WHERE, GROUP BY, or LIMIT/OFFSET for other rows.]"
+    assert lines[1] == "id" and len(lines) == 2 + MAX_ROWS
+
+
+def test_exactly_max_rows_has_no_note(db_path):
+    lines = run_sql(db_path, f"SELECT id FROM orders LIMIT {MAX_ROWS}").splitlines()
+    assert lines[0] == "id" and len(lines) == 1 + MAX_ROWS
 
 
 @pytest.mark.parametrize(

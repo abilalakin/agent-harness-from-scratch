@@ -20,7 +20,7 @@ flowchart LR
     MT --> Conn["McpConnection<br/>background thread,<br/>asyncio loop"]
     Conn -- "MCP over stdio<br/>(starts the subprocess)" --> McpTools
     ST -- "mode=ro,<br/>no ATTACH" --> DB[("data/erp.db<br/>read-only")]
-    Runner -. "result, cut by cap_output<br/>(3000 chars), as a tool message" .-> Agent
+    Runner -. "result as a tool message<br/>partial? a note comes first:<br/>[showing rows 1-50 of 112 ...]" .-> Agent
     Agent -. "final answer<br/>(or stop after max_steps)" .-> CLI
 
     subgraph ErpMcp["erp-mcp: separate process (mcp_server.py)"]
@@ -46,3 +46,4 @@ The agent loops between the model and the tools until the model answers without 
 - **Step 3c:** SQL tools. `describe_tables` shows the table layout, `run_sql` runs one query. The database is opened read-only and can't attach other files, so writes fail inside SQLite itself. Results stop at 50 rows.
 - **Step 4a:** An MCP server, `erp-mcp`. It offers the same two SQL tools to any MCP client, as a separate program talking JSON-RPC over stdin/stdout. Our harness doesn't use it yet.
 - **Step 4b:** The harness as an MCP client. With `HARNESS_SQL_VIA=mcp` it starts `erp-mcp`, asks for its tools, and wraps each one as a normal `Tool` named `mcp__erp__<tool>`. `McpConnection` runs the async MCP client on a background thread, so the rest of the harness stays synchronous. The agent loop didn't change.
+- **Step 5a:** Partial results say so first. `run_sql` counts every row and starts a cut result with `[showing rows 1-50 of 112 ...]`. `cap_output` (the 3000-character safety net) also puts its note at the top.

@@ -16,16 +16,18 @@ from zoneinfo import ZoneInfo
 from harness.model import Message
 
 # Tool results go into the model's context, which only holds 8192 tokens (about 4 characters
-# each). One big PDF or table could fill it, so every result is cut to this size.
-# Step 5 replaces this blunt cut with paging and search.
+# each). The tools page and limit their own output, so this is only a safety net: any result
+# longer than this is cut, with a note.
 MAX_TOOL_OUTPUT = 3000
 
 
 def cap_output(text: str, limit: int = MAX_TOOL_OUTPUT) -> str:
     if len(text) <= limit:
         return text
-    return text[:limit] + (
-        f"\n...[cut: {len(text) - limit} more characters. Ask for less, for example one page or fewer rows.]"
+    # The note goes first. A model reads top-down, and a note at the end is easy to miss.
+    return (
+        f"[cut: showing the first {limit} of {len(text)} characters. "
+        "Ask for a smaller part: one page, a row range, or a narrower query.]\n" + text[:limit]
     )
 
 

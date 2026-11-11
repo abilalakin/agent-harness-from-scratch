@@ -51,21 +51,29 @@ def describe_tables(db_path: Path) -> str:
 
 
 def run_sql(db_path: Path, query: str) -> str:
-    """Run one SQL query. Returns a header line, then one line per row, at most MAX_ROWS rows."""
+    """Run one SQL query. Returns a header line, then one line per row, at most MAX_ROWS rows.
+
+    When there are more rows, a first line says how many: "[showing rows 1-50 of 112. ...]".
+    """
     # A new connection per call: nothing stays open between questions.
     with closing(connect_read_only(db_path)) as con:
         cursor = con.execute(query)  # Python's sqlite3 refuses more than one statement here
         if cursor.description is None:
             return "(no rows)"
         header = " | ".join(column[0] for column in cursor.description)
-        # Ask for one row more than we show. If it arrives, we know the result was cut.
-        rows = cursor.fetchmany(MAX_ROWS + 1)
+        rows = cursor.fetchmany(MAX_ROWS)
+        # Count the rows we won't show, so the note can give the real total.
+        # (Counting is cheap; the time limit still stops a query that never ends.)
+        total = len(rows) + sum(1 for _ in cursor)
 
     if not rows:
         return "(no rows)"
-    lines = [header] + [" | ".join("" if v is None else str(v) for v in row) for row in rows[:MAX_ROWS]]
-    if len(rows) > MAX_ROWS:
-        lines.append(f"...[more rows not shown, only the first {MAX_ROWS}. Use WHERE, GROUP BY or LIMIT.]")
+    lines = [header] + [" | ".join("" if v is None else str(v) for v in row) for row in rows]
+    if total > len(rows):
+        # The note goes first, with the real total. In step 3 the model read a note at the end,
+        # "only the first 50", as "there are 50 invoices". There were 112.
+        note = f"[showing rows 1-{len(rows)} of {total}. Use WHERE, GROUP BY, or LIMIT/OFFSET for other rows.]"
+        lines.insert(0, note)
     return "\n".join(lines)
 
 

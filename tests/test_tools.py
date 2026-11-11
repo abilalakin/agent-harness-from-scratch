@@ -65,12 +65,13 @@ def test_cap_output_short_text_unchanged():
     assert cap_output("abc", limit=10) == "abc"
 
 
-def test_cap_output_cuts_and_says_how_much():
+def test_cap_output_says_so_first():
     out = cap_output("x" * 25, limit=10)
-    assert out.startswith("x" * 10) and "[cut: 15 more characters" in out
+    assert out.startswith("[cut: showing the first 10 of 25 characters.")
+    assert out.endswith("\n" + "x" * 10)
 
 
 def test_run_tool_call_caps_long_results():
     big = Tool("big", "", {"type": "object", "properties": {}}, lambda: "y" * 5000)
     out = run_tool_call({"big": big}, call("big", "{}"))
-    assert len(out) < 3200 and "[cut: 2000 more characters" in out
+    assert out.startswith("[cut: showing the first 3000 of 5000 characters.")
