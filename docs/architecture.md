@@ -13,7 +13,7 @@ flowchart LR
     Agent -- "tool_calls" --> Runner["tools.run_tool_call<br/>errors become text"]
     Runner --> T1[get_current_time]
     Runner --> T2[calculate]
-    Runner --> FT["file tools<br/>list_files, read_text,<br/>read_pdf, read_excel"]
+    Runner --> FT["file tools<br/>list_files, read_text, read_pdf,<br/>read_excel (30 rows a page),<br/>search_files (matching lines only)"]
     FT -- "safe_path:<br/>inside data/ only" --> Data
     Runner -- "HARNESS_SQL_VIA=builtin<br/>(default)" --> ST["SQL tools<br/>describe_tables, run_sql<br/>max 50 rows"]
     Runner -- "HARNESS_SQL_VIA=mcp" --> MT["MCP tools<br/>mcp__erp__describe_tables,<br/>mcp__erp__run_sql"]
@@ -47,3 +47,5 @@ The agent loops between the model and the tools until the model answers without 
 - **Step 4a:** An MCP server, `erp-mcp`. It offers the same two SQL tools to any MCP client, as a separate program talking JSON-RPC over stdin/stdout. Our harness doesn't use it yet.
 - **Step 4b:** The harness as an MCP client. With `HARNESS_SQL_VIA=mcp` it starts `erp-mcp`, asks for its tools, and wraps each one as a normal `Tool` named `mcp__erp__<tool>`. `McpConnection` runs the async MCP client on a background thread, so the rest of the harness stays synchronous. The agent loop didn't change.
 - **Step 5a:** Partial results say so first. `run_sql` counts every row and starts a cut result with `[showing rows 1-50 of 112 ...]`. `cap_output` (the 3000-character safety net) also puts its note at the top.
+- **Step 5b:** `read_excel` returns 30 rows at a time and says which `start_row` to call next. `max_rows` can't go above the page size.
+- **Step 5c:** `search_files` finds a word across text, PDF and Excel files and returns only the matching lines, each with its file and page or row. The model can search five PDFs in one call instead of reading them one by one.

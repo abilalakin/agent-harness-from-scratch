@@ -1,6 +1,15 @@
 import pytest
 
-from harness.file_tools import list_files, make_file_tools, read_excel, read_pdf, read_text, safe_path
+from harness.file_tools import (
+    MAX_MATCHES,
+    list_files,
+    make_file_tools,
+    read_excel,
+    read_pdf,
+    read_text,
+    safe_path,
+    search_files,
+)
 from harness.practice_data import make_all
 from harness.tools import run_tool_call
 
@@ -119,3 +128,46 @@ def test_tools_run_through_run_tool_call(data_dir):
         {"id": "c1", "type": "function", "function": {"name": "read_text", "arguments": '{"path": "../../etc/passwd"}'}},
     )
     assert out.startswith("Error: tool 'read_text' failed:") and "outside the data folder" in out
+
+
+def test_search_finds_every_invoice_total_with_location(data_dir):
+    lines = search_files(data_dir, "total:").splitlines()
+    pdf_lines = [line for line in lines if line.startswith("invoices/")]
+    assert [line.split(" page")[0] for line in pdf_lines] == [f"invoices/INV-2026-000{n}.pdf" for n in range(1, 6)]
+    assert all(" page 1: Total: " in line and line.endswith(" EUR") for line in pdf_lines)
+
+
+def test_search_excel_rows_case_insensitive(data_dir):
+    out = search_files(data_dir, "BLUE SKY", path="legacy")
+    assert out and all(line.startswith("legacy/customers_export.xlsx row ") for line in out.splitlines())
+
+
+def test_search_text_files_by_line(data_dir):
+    assert search_files(data_dir, "SQLite database").startswith("README.txt line ")
+
+
+def test_search_no_match(data_dir):
+    assert search_files(data_dir, "zzz-not-there") == "(no matches for 'zzz-not-there')"
+
+
+def test_search_many_matches_says_total_first(data_dir):
+    first = search_files(data_dir, "info@").splitlines()[0]
+    assert first.startswith(f"[showing {MAX_MATCHES} of ") and "matches" in first
+
+
+def test_search_skips_the_database_file(data_dir):
+    assert "erp.db" not in search_files(data_dir, "customers")
+
+
+def test_search_refuses_paths_outside(data_dir):
+    with pytest.raises(ValueError, match="outside the data folder"):
+        search_files(data_dir, "x", path="../")
+
+
+def test_search_empty_query(data_dir):
+    with pytest.raises(ValueError, match="empty"):
+        search_files(data_dir, "  ")
+
+
+def test_search_is_a_tool(data_dir):
+    assert "search_files" in {t.name for t in make_file_tools(data_dir)}

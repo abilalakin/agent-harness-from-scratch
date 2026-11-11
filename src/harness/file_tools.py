@@ -16,6 +16,7 @@ from harness.tools import Tool
 MISSING_DATA_HINT = "No practice data yet. Run: uv run make-data"
 TEXT_SUFFIXES = {".txt", ".md", ".csv", ".json"}
 EXCEL_PAGE_ROWS = 30  # rows per read_excel call; 30 rows of this sheet are about 2000 characters
+MAX_MATCHES = 30  # search results per call
 
 
 def safe_path(data_dir: Path, relative: str) -> Path:
@@ -123,8 +124,65 @@ def read_excel(
     return "\n".join(lines)
 
 
+# --- Search ---------------------------------------------------------------
+#
+# One small generator per file type. Each yields (location, text) pairs, where
+# location is what the model needs to follow up: "page 1" → read_pdf page=1,
+# "row 12" → read_excel start_row=12.
+
+
+def _text_lines(file: Path):
+    for n, line in enumerate(file.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+        yield f"line {n}", line
+
+
+def _pdf_lines(file: Path):
+    for n, page in enumerate(PdfReader(file).pages, 1):
+        for line in (page.extract_text() or "").splitlines():
+            yield f"page {n}", line
+
+
+def _excel_rows(file: Path):
+    book = openpyxl.load_workbook(file, read_only=True, data_only=True)
+    for sheet in book.worksheets:
+        for n, row in enumerate(sheet.iter_rows(values_only=True), 1):
+            yield f"row {n}", " | ".join("" if cell is None else str(cell) for cell in row)
+
+
+_SEARCHERS = {**{suffix: _text_lines for suffix in TEXT_SUFFIXES}, ".pdf": _pdf_lines, ".xlsx": _excel_rows}
+
+
+def search_files(data_dir: Path, query: str, path: str = ".") -> str:
+    """Find a word or number in every file below path. Returns only the matching lines, with where they are.
+
+    Case-insensitive. Files no searcher understands (like erp.db) are skipped: use run_sql for those.
+    """
+    query = query.strip()
+    if not query:
+        raise ValueError("the query is empty")
+    folder = safe_path(data_dir, path)
+    root = data_dir.resolve()
+    needle = query.lower()
+
+    matches = []
+    for file in sorted(p for p in folder.rglob("*") if p.is_file()):
+        searcher = _SEARCHERS.get(file.suffix.lower())
+        if searcher is None:
+            continue
+        for location, text in searcher(file):
+            if needle in text.lower():
+                matches.append(f"{file.relative_to(root)} {location}: {text.strip()}")
+
+    if not matches:
+        return f"(no matches for '{query}')"
+    lines = matches[:MAX_MATCHES]
+    if len(matches) > MAX_MATCHES:
+        lines.insert(0, f"[showing {MAX_MATCHES} of {len(matches)} matches. Use a more specific query or a path.]")
+    return "\n".join(lines)
+
+
 def make_file_tools(data_dir: Path) -> list[Tool]:
-    """The four file tools, each bound to one data folder."""
+    """The five file tools, each bound to one data folder."""
     path_param = {"type": "string", "description": "Path inside the data folder, like invoices/INV-2026-0001.pdf"}
     return [
         Tool(
@@ -166,5 +224,22 @@ def make_file_tools(data_dir: Path) -> list[Tool]:
                 "required": ["path"],
             },
             fn=partial(read_excel, data_dir),
+        ),
+        Tool(
+            name="search_files",
+            description=(
+                "Find a word or number in all text, PDF and Excel files in the data folder. Returns only the "
+                "matching lines, with the file and page or row. Use it for questions about many files, "
+                "instead of reading each file. The database is not searched: use run_sql."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Text to look for, case does not matter"},
+                    "path": {**path_param, "description": "Folder to search. Default: all."},
+                },
+                "required": ["query"],
+            },
+            fn=partial(search_files, data_dir),
         ),
     ]

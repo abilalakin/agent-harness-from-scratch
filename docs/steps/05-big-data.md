@@ -97,3 +97,37 @@ Asked "how many customers in the legacy export are new, meaning not in the ERP d
 Two fixes came out of this. `max_rows` is now capped at the page size, so `read_excel` can never return more than the safety net allows, and the two notes can't disagree. And a lesson for 5c: comparing 56 messy names against a database by eye, in one SQL `IN (...)`, is the wrong tool. Step 7 computes a match score per row instead.
 
 The right answer, for the record: 10 new customers (plus 3 duplicate rows and 2 empty ones). Nothing in the model's run got near it.
+
+## 5c: Search instead of reading everything
+
+### What this part teaches
+
+**`grep`, not `cat`.** When a question spans many files, reading each one fills the context with text the model will mostly ignore. Searching returns only the lines that matter. "What is the total of every invoice?" used to need five `read_pdf` calls, about 2500 characters. Now it's one `search_files("total:")` call that returns five lines:
+
+```
+invoices/INV-2026-0001.pdf page 1: Total: 2521.35 EUR
+invoices/INV-2026-0002.pdf page 1: Total: 977.12 EUR
+...
+```
+
+### Every match says where it is
+
+Each line starts with the file and a location: `page 1` for a PDF, `row 12` for Excel, `line 3` for a text file. Those are the same units the reading tools take, so the model can follow up precisely: `read_pdf(path, page=1)`, `read_excel(path, start_row=12)`. Search finds, read confirms.
+
+### What it doesn't search
+
+`erp.db` is binary, and a substring search over a database is the wrong tool anyway. The tool description says so and points to `run_sql`. A tool that says what it's *not* for saves the model a wasted call.
+
+Search results are capped at 30 matches, with the note first, like everything else in step 5: `[showing 30 of 86 matches. Use a more specific query or a path.]`.
+
+### Files to read
+
+1. `src/harness/file_tools.py`: the three small generators (`_text_lines`, `_pdf_lines`, `_excel_rows`) and `search_files`. One generator per file type is all the structure it needs.
+2. `src/harness/agent.py`: the one new sentence in `SYSTEM_PROMPT`.
+
+### What we saw with qwen3:8b
+
+- **"which files mention Blue Sky?"**: one `search_files("Blue Sky")` call, then a correct answer listing four rows of the Excel export, with row numbers. No file was read in full.
+- **"list the total amount of every invoice PDF"**: `list_files` on `invoices/`, then one `search_files("Total", path="invoices")` call. It narrowed the search to the folder on its own. Five totals, all correct, in two tool calls. In step 3 the same question needed five `read_pdf` calls and the model gave up before comparing anything.
+
+Both times the model picked search without being told to. The one sentence added to the system prompt, "search first instead of reading every file", plus a tool description that says what the tool is for, was enough.
