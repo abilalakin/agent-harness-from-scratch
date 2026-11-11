@@ -49,3 +49,51 @@ Complete results don't change. A note on every result would be noise the model l
 - **"how many invoices are there? list their numbers"**: the model called `list_files` on `invoices/`, found 5 PDFs and answered "5 invoices". Not wrong, just a different question: invoices live in two places, 5 PDFs and 112 database rows. A vague question gets whichever source the model looks at first.
 - **"how many invoices are in the ERP database? list all their numbers"**: `describe_tables`, then `SELECT COUNT(*)` (112), then `SELECT invoice_number`, which came back with `[showing rows 1-50 of 112 ...]` on top. The answer said **112** and knew the list was partial. In step 3 the same data gave "50".
 - But it **didn't fetch the rest itself**. It said "the first 50 are listed above" (you never saw them: tool results go to the model, not to you) and offered to use `OFFSET`. Knowing a result is partial is step one. Acting on it without being asked is something the model still has to choose to do.
+
+## 5b: Paging through Excel
+
+### What went wrong in step 3
+
+The Excel export is about 4200 characters. `cap_output` cut it at row 41, and there was no way to ask for the rest. Rows 42 to 56 could not be reached by any tool. The cut note even said "ask for fewer rows", which `read_excel` couldn't do.
+
+### What changed
+
+`read_excel` now returns **one page of 30 rows**, and the second line says exactly where you are and what to call next:
+
+```
+Sheets: Customers
+[rows 1-30 of 56. Next page: start_row=31]
+1: Cust Name | E-Mail | Town | Country Code | Since
+2: SILVERLINE LOGISTICS | info@silverline-logistics.example | Paris | fr | 17 Aug 2020
+...
+```
+
+Call it again with `start_row=31` and you get rows 31 to 56, ending with `[rows 31-56 of 56, end of sheet]`. Three details worth noticing:
+
+- **The note names the exact argument to send next.** A model copies what it's given. "Next page: start_row=31" turns into `read_excel(path, start_row=31)` without the model having to count.
+- **Every page repeats the header row** (`1: Cust Name | ...`). On page 2 the model would otherwise see `31: Aurora Ltd | info@... | Milan | IT | 1 Jun 2026` and have to remember which column is which.
+- **`"41"` works as well as `41`.** Small models send numbers as strings about half the time. One `int()` call avoids a pointless error round-trip.
+
+`tests/test_file_tools.py::test_every_excel_row_is_reachable` does what the model is supposed to do: start at row 1, follow the `start_row=` note until "end of sheet", and check that all 56 rows were seen. If paging ever skips or repeats a row, that test fails.
+
+### A small fix on the side
+
+`read_pdf` on an `.xlsx` file used to say only "is not a PDF". Now all three readers share one error that names the right tool for each file type, as `read_text` already did. An error that says what to do next is worth more than one that only says no.
+
+### Files to read
+
+1. `src/harness/file_tools.py`: `read_excel`, and the `_wrong_type` helper above it.
+2. `tests/test_file_tools.py`: `test_every_excel_row_is_reachable`.
+
+### What we saw with qwen3:8b
+
+Asked "how many customers in the legacy export are new, meaning not in the ERP database? read the whole sheet", the model:
+
+1. Guessed a file name (`legacy_customers.xlsx`), got "no file ... Use list_files", listed the files, and found the right one. The error message did its job.
+2. Called `read_excel` with **`max_rows: 1000`**. The first version of 5b allowed that. The whole sheet (4213 characters) came back, the 3000-character safety net cut it at about row 41, and the paging note inside the cut text still said `[rows 1-56 of 56, end of sheet]`. **The tool contradicted itself**, and the model believed the friendlier half: it thought it had read everything.
+3. Pasted the names and emails it had seen into one SQL query with `name IN (...) AND email IN (...)`. The exact strings (`'Redwood  GmbH'`, `'INFO@POLARIS-AERO.EXAMPLE'`) match nothing in the clean database, so the count was 0.
+4. Concluded that **all** customers are new, and gave the number as **4213**. That's the character count from the cut note. A model under pressure will grab any number in sight.
+
+Two fixes came out of this. `max_rows` is now capped at the page size, so `read_excel` can never return more than the safety net allows, and the two notes can't disagree. And a lesson for 5c: comparing 56 messy names against a database by eye, in one SQL `IN (...)`, is the wrong tool. Step 7 computes a match score per row instead.
+
+The right answer, for the record: 10 new customers (plus 3 duplicate rows and 2 empty ones). Nothing in the model's run got near it.

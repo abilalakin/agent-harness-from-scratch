@@ -48,10 +48,58 @@ def test_read_pdf_marks_pages_and_can_pick_one(data_dir):
     assert "--- page 2 of 2 ---" in page_two and "--- page 1 of 2 ---" not in page_two
 
 
-def test_read_excel_lists_sheets_and_header(data_dir):
-    out = read_excel(data_dir, "legacy/customers_export.xlsx")
-    assert out.splitlines()[0] == "Sheets: Customers"
-    assert "Cust Name | E-Mail | Town | Country Code | Since" in out
+EXPORT = "legacy/customers_export.xlsx"
+
+
+def test_read_excel_first_page_says_where_next_page_starts(data_dir):
+    lines = read_excel(data_dir, EXPORT).splitlines()
+    assert lines[0] == "Sheets: Customers"
+    assert lines[1] == "[rows 1-30 of 56. Next page: start_row=31]"
+    assert lines[2].startswith("1: Cust Name | E-Mail") and lines[-1].startswith("30: ")
+
+
+def test_read_excel_last_page_repeats_header_and_says_end(data_dir):
+    lines = read_excel(data_dir, EXPORT, start_row="41").splitlines()  # a string, as models send it
+    assert lines[1] == "[rows 41-56 of 56, end of sheet]"
+    assert lines[2].startswith("1: Cust Name") and lines[3].startswith("41: ") and lines[-1].startswith("56: ")
+
+
+def test_read_excel_max_rows(data_dir):
+    note = read_excel(data_dir, EXPORT, start_row=10, max_rows=5).splitlines()[1]
+    assert note == "[rows 10-14 of 56. Next page: start_row=15]"
+
+
+def test_read_excel_max_rows_cannot_exceed_the_page_size(data_dir):
+    # A model asked for max_rows=1000 once, got the whole sheet, and cap_output cut it while the
+    # paging note still said "end of sheet". The page size is the ceiling.
+    note = read_excel(data_dir, EXPORT, max_rows=1000).splitlines()[1]
+    assert note == "[rows 1-30 of 56. Next page: start_row=31]"
+
+
+@pytest.mark.parametrize("start_row", [0, -1, 57, 99])
+def test_read_excel_start_row_out_of_range(data_dir, start_row):
+    with pytest.raises(ValueError, match="between 1 and 56"):
+        read_excel(data_dir, EXPORT, start_row=start_row)
+
+
+def test_every_excel_row_is_reachable(data_dir):
+    seen, start = set(), 1
+    while True:
+        lines = read_excel(data_dir, EXPORT, start_row=start).splitlines()
+        seen |= {int(line.split(":")[0]) for line in lines[2:]}
+        if "end of sheet" in lines[1]:
+            break
+        start = int(lines[1].split("start_row=")[1].rstrip("]"))
+    assert seen == set(range(1, 57))
+
+
+@pytest.mark.parametrize(
+    "reader, path, right_tool",
+    [(read_pdf, "legacy/customers_export.xlsx", "read_excel"), (read_excel, "invoices/INV-2026-0001.pdf", "read_pdf")],
+)
+def test_wrong_reader_names_the_right_tool(data_dir, reader, path, right_tool):
+    with pytest.raises(ValueError, match=right_tool):
+        reader(data_dir, path)
 
 
 def test_missing_file_says_use_list_files(data_dir):
