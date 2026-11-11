@@ -59,7 +59,7 @@ MCP clients start servers with only a few safe environment variables, not your w
 **Connect Claude Code to your server.** This changes your Claude Code settings for this project only, so run it yourself:
 
 ```bash
-claude mcp add erp -- uv run --directory ~/Desktop/Personal/learn-harness-engineering erp-mcp
+claude mcp add erp -- uv run --directory ~/Desktop/Personal/agent-harness-from-scratch erp-mcp
 ```
 
 Then, in Claude Code: "use the erp tools: which product has sold the most units?". Claude Code will call `mcp__erp__describe_tables` and `mcp__erp__run_sql`, your code running inside someone else's agent. Remove it with `claude mcp remove erp`.
