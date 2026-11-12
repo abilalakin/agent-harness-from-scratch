@@ -171,3 +171,11 @@ def test_search_empty_query(data_dir):
 
 def test_search_is_a_tool(data_dir):
     assert "search_files" in {t.name for t in make_file_tools(data_dir)}
+
+
+def test_list_and_search_skip_symlinks_leading_outside(tmp_path):
+    make_all(tmp_path / "d")
+    (tmp_path / "secret.txt").write_text("the secret word is zanzibar")
+    (tmp_path / "d" / "link.txt").symlink_to(tmp_path / "secret.txt")
+    assert "link.txt" not in list_files(tmp_path / "d")
+    assert search_files(tmp_path / "d", "zanzibar") == "(no matches for 'zanzibar')"

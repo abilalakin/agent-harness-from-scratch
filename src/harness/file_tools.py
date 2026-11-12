@@ -47,13 +47,20 @@ def _wrong_type(path: str, expected: str) -> ValueError:
     )
 
 
-def list_files(data_dir: Path, path: str = ".") -> str:
+def _files_below(data_dir: Path, path: str) -> list[Path]:
+    """Every file below a folder in the data folder, sorted. A symlink that leads outside is left out:
+    safe_path checked the folder, but rglob would happily follow a link inside it to anywhere."""
     folder = safe_path(data_dir, path)
     if not folder.is_dir():
         raise ValueError(f"'{path}' is not a folder in the data folder")
     root = data_dir.resolve()
+    return sorted(p for p in folder.rglob("*") if p.is_file() and p.resolve().is_relative_to(root))
+
+
+def list_files(data_dir: Path, path: str = ".") -> str:
+    root = data_dir.resolve()
     lines = []
-    for file in sorted(p for p in folder.rglob("*") if p.is_file()):
+    for file in _files_below(data_dir, path):
         size_kb = max(1, round(file.stat().st_size / 1024))
         lines.append(f"{file.relative_to(root)}  ({size_kb} KB)")
     return "\n".join(lines) or "(no files)"
@@ -160,12 +167,11 @@ def search_files(data_dir: Path, query: str, path: str = ".") -> str:
     query = query.strip()
     if not query:
         raise ValueError("the query is empty")
-    folder = safe_path(data_dir, path)
     root = data_dir.resolve()
     needle = query.lower()
 
     matches = []
-    for file in sorted(p for p in folder.rglob("*") if p.is_file()):
+    for file in _files_below(data_dir, path):
         searcher = _SEARCHERS.get(file.suffix.lower())
         if searcher is None:
             continue
