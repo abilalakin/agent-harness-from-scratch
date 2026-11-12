@@ -11,8 +11,12 @@ Each step is a commit with tests, a note on what it teaches (`docs/steps/`), and
 | 3 | Fake ERP data; file, PDF, Excel and read-only SQL tools, locked to one folder |
 | 4 | An MCP server for the SQL tools, and the harness as an MCP client |
 | 5 | Big data: partial-result notes, paging, search, keeping the chat inside the context window |
-| 6 | Code execution in a sandbox |
-| 7 | Human in the loop: a messy data migration with an approval page |
+| 6 | Evals and benchmarking: a task set with answer and trajectory checks, an LLM judge, model and prompt comparisons |
+| 7 | Code execution in a sandbox (bubblewrap) |
+| 8 | Structured output and a data migration pipeline: code does the steps, the model only the fuzzy ones |
+| 9 | Human in the loop: an approval page on the pipeline's queue |
+| 10 | Semantic search (RAG) with a local embedding model, measured against keyword search |
+| 11 | Subagents, memory, a rules file |
 
 Start with `docs/design.md`, then `docs/steps/00-setup.md`.
 

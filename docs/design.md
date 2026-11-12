@@ -39,12 +39,15 @@ Decided together:
 - **Language:** Python.
 - **Model:** an open model run locally with Ollama. The default is Qwen3 8B. It fits the laptop's RTX 5060 (8 GB video memory).
 - **Model API:** the OpenAI-style chat format that Ollama serves. Switching to another local or hosted model only changes the URL and model name in settings.
-- **Interface:** a terminal chat program for steps 1 to 6. A web page for step 7.
+- **Interface:** a terminal chat program for steps 1 to 8. A web page for step 9.
 - **Web page:** React for the page, FastAPI for the backend.
 - **Diagram:** a Mermaid diagram in `docs/architecture.md`, updated in the same change as the code at every step.
 - **MCP:** both sides. We write our own MCP server and make the harness an MCP client.
-- **Sandboxing:** limits on file and database tools from step 3. Code the model writes runs in a throwaway Podman container from step 6.
+- **Sandboxing:** limits on file and database tools from step 3. Code the model writes runs in a throwaway bubblewrap (`bwrap`) sandbox from step 7. Lighter than a container: no daemon, no image, starts in milliseconds, and Fedora ships it.
 - **Human in the loop:** the agent pauses and asks a person when a computed score is below a threshold, or before any write. The person approves, rejects, or edits on a web page.
+- **Evals and benchmarking (added 2026-11-12):** our own task set over the practice data, with checkers for answers and for what the agent did (trajectories). Run N times, scored, written to a markdown report. Every step after it reports its numbers.
+- **Workflows, not only agents:** the migration is a pipeline where code does the steps and the model is called only where judgment is needed. Structured output (JSON that matches a schema, validated, retried) is how the model's part is kept honest.
+- **RAG:** semantic search as one more tool the agent chooses to call, with a local embedding model through Ollama and vectors in SQLite. Compared against keyword search, not assumed better.
 
 My calls (not discussed, change them if you disagree):
 
@@ -70,41 +73,50 @@ Each step ends with: code that runs, passing tests, an updated diagram, and a st
    - The database opens in read-only mode, so a `DELETE` or `UPDATE` from the model cannot run.
 4. **MCP.** Write a database MCP server. Make the harness an MCP client that loads tools from it. Compare with the built-in SQL tool from step 3.
 5. **Big data.** Handle results that don't fit in context: limit and page results, summarize, search instead of dumping whole files, trim old history.
-6. **Code execution in a sandbox.** A tool that lets the agent write a short Python script (for example with pandas) and run it, so it can work through a big Excel file or table without loading it into context. Code the model writes is untrusted, so it runs in a Podman container:
-   - no network,
-   - `data/` mounted read-only, and a separate empty folder for output,
-   - time and memory limits,
-   - the container is thrown away after each run.
-7. **Human in the loop.** The customer migration task (details below).
-8. **Later, any order:** memory across sessions, subagents, a rules file (like `AGENTS.md`) that the harness loads into its system prompt. Each gets its own short design when we reach it.
+6. **Evals and benchmarking.** Turn "the model seemed to do it" into a number. The step 5 run where the model read two invoice PDFs and claimed it had checked five is the first test case.
+   - a. A task set over the practice data: about ten questions with known answers and a checker each (exact value, contains, number within tolerance). `uv run evals` runs each N times and writes a markdown report with pass rates.
+   - b. Trajectory checks: not only the answer, but what the agent did. "Was `read_pdf` called for all five invoices?" A right answer reached by skipping work is a failure.
+   - c. LLM as judge for free-text answers (summaries), graded against a rubric. Then its biases: longer answers, its own style. The judge is checked against a few hand-graded answers before it is trusted.
+   - d. Benchmarking: the same task set with one thing varied, in one table: model (`qwen3:8b`, a smaller one, a hosted one if a key exists), prompt, harness version. Columns: pass rate, tool calls, tokens, seconds.
+   - e. Public benchmarks, as reading: what MMLU, SWE-bench and τ-bench measure, and why a small eval set over your own task beats them for your own decisions.
+7. **Code execution in a sandbox.** A `run_python` tool: the model writes a short script (pandas, openpyxl, pypdf are available) and gets stdout, stderr and any file it wrote to an output folder. The point is working through a big Excel file or table without loading it into context.
+   - a. Plain `subprocess` first, to see the danger: the script can read `~/.ssh` and delete files.
+   - b. Then `bwrap`: no network, `data/` read-only, one writable output folder, nothing else visible, a time and memory limit, thrown away after each run. The same script now fails.
+8. **Structured output and the migration pipeline.** Two things that belong together.
+   - Structured output: ask the model for JSON matching a schema (pydantic), validate it, send the error back and retry on failure. Used first to extract invoice fields from the PDFs.
+   - The pipeline: extract (Excel, PDF) → normalize → validate against the schema → match score against existing customers → proposed change. Code does every step; the model is called only for the fuzzy ones. Every row carries where it came from. Anything uncertain goes to a queue instead of through. No database writes yet.
+9. **Human in the loop.** The web page on top of the step 8 queue (details below).
+10. **Semantic search (RAG).** An embedding model through Ollama (`nomic-embed-text` or similar), chunks and vectors in SQLite, a `search_semantic` tool next to `search_files`. The practice data grows (about fifty generated contracts with varied wording) so that keyword search fails where meaning search works. Measured with the step 6 evals, including the cases where RAG retrieves the wrong contract or cuts a chunk in the wrong place.
+11. **Later, any order:** subagents (a fresh context per task, only the summary comes back), memory across sessions, a rules file (like `AGENTS.md`) that the harness loads into its system prompt. Each gets its own short design when we reach it.
 
-### Step 7 in more detail
+### Step 9 in more detail
 
-**Task:** migrate the messy legacy Excel export of customers into the ERP database. The same customer shows up as "ACME Ltd", "Acme Limited" and "ACME LTD." with small address typos.
+**Task:** migrate the messy legacy Excel export of customers into the ERP database. The same customer shows up as "ACME Ltd", "Acme Limited" and "ACME LTD." with small address typos. Step 8 built the pipeline that produces proposed changes and a queue of uncertain ones; step 9 puts a person on that queue.
 
 **Score:** for each incoming row, code computes a match score against existing customers with a simple string-similarity check. The score comes from code, so it is real and repeatable.
 
 **When the agent asks a person:**
-- Score of 0.9 or more: the agent merges the row on its own.
-- Score below 0.9: the agent pauses and the row goes into an approval queue.
+- Score of 0.9 or more: the row is merged on its own.
+- Score below 0.9: the row goes into the approval queue.
 - Any write to the database needs approval at first. This can be relaxed later.
 
 **Model's own score:** the agent also gives its own confidence. The page shows it next to the computed score, so the user can see how often they disagree.
 
-**Web page:** a list of waiting decisions. Each shows the incoming row, the best match, both scores, and the agent's reason. Buttons: Approve, Reject, Edit (with a note). The answer goes back to the agent as a tool result, and the agent carries on.
+**Web page:** a list of waiting decisions. Each shows the incoming row, the best match, both scores, and the agent's reason. Buttons: Approve, Reject, Edit (with a note). The answer goes back to the pipeline, and it carries on.
 
 **Shape:** FastAPI holds the queue and exposes a JSON API. The React page reads the queue and sends answers. A few components: the queue list, one decision card, the buttons.
 
 ## Assumptions
 
 - The laptop runs Fedora with working NVIDIA drivers (checked: RTX 5060, 8 GB video memory, 14 GB RAM).
-- Python 3.12 or newer. Node.js for the React page in step 7. Podman for step 6 (Fedora ships it).
-- The harness only reads data in steps 0 to 6. Writes start in step 7, always behind approval.
+- Python 3.12 or newer. Node.js for the React page in step 9. `bwrap` for step 7 (checked: bubblewrap 0.12.0 is installed).
+- The harness only reads data in steps 0 to 8. Writes start in step 9, always behind approval.
 
 ## Known risks
 
 - **Small model, more mistakes.** An 8B model will sometimes call tools wrongly. Handling that is part of step 2. If it blocks progress, switch to a bigger local model or a hosted one by changing settings.
 - **Ollama's context window.** Ollama's default context is small. Setup must raise it, or long tool results get cut without warning.
+- **Evals on a small model are noisy.** An 8B model at N=5 runs still swings. Reports show counts (4 of 5), not only percentages, and a change needs a clear gap to count as better.
 
 ## Left to the builder
 
