@@ -59,3 +59,13 @@ def test_repl_ctrl_c_while_model_answers_stops_that_question_only():
     assert any("(stopped)" in line for line in out)
     assert any("still here" in line for line in out)
     assert [m["role"] for m in agent.messages] == ["system", "user", "assistant"]
+
+
+def test_repl_shows_context_size_when_the_agent_has_a_window():
+    out = run(Agent(FakeModel([reply("x")]), context_window=8192), ["hi", "/exit"])
+    assert any("[context ~" in line and "of 8192 tokens]" in line for line in out)
+
+
+def test_repl_hides_context_size_without_a_window():
+    out = run(Agent(FakeModel([reply("x")])), ["hi", "/exit"])
+    assert not any("[context" in line for line in out)

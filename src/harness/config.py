@@ -20,6 +20,8 @@ class Settings:
     # Where the SQL tools come from: "builtin" (sql_tools.py, in this process)
     # or "mcp" (the erp-mcp server, a separate process).
     sql_via: str = "builtin"
+    # Tokens the model can see at once. Must match OLLAMA_CONTEXT_LENGTH (see docs/steps/00-setup.md).
+    context_window: int = 8192
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
@@ -36,4 +38,5 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         max_steps=int(env.get("HARNESS_MAX_STEPS", default.max_steps)),
         data_dir=Path(env.get("HARNESS_DATA_DIR", default.data_dir)),
         sql_via=sql_via,
+        context_window=int(env.get("HARNESS_CONTEXT_WINDOW", default.context_window)),
     )

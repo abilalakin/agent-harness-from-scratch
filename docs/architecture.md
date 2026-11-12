@@ -6,7 +6,8 @@ How the harness fits together right now. This diagram changes with every step.
 flowchart LR
     User([You]) -- types --> CLI["cli.run_repl<br/>read, print, /reset, /exit<br/>prints [tool] lines"]
     CLI -- "ask(text)" --> Agent["Agent<br/>messages: list of dicts<br/>(system, user, assistant, tool, ...)"]
-    Agent -- "whole history + tool schemas" --> Model["OpenAIChatModel<br/>strips &lt;think&gt; blocks"]
+    Agent -- "history + tool schemas" --> Fit["context.fit_to_budget<br/>over budget? shorten old tool<br/>results, then drop old turns"]
+    Fit -- "fits in 8192 - 2000 reserve" --> Model["OpenAIChatModel<br/>strips &lt;think&gt; blocks"]
     Model -- "HTTP POST /v1/chat/completions" --> Ollama["Ollama<br/>qwen3:8b on the GPU<br/>localhost:11434"]
     Ollama -. "answer, or tool_calls" .-> Model
     Model -. reply .-> Agent
@@ -49,3 +50,4 @@ The agent loops between the model and the tools until the model answers without 
 - **Step 5a:** Partial results say so first. `run_sql` counts every row and starts a cut result with `[showing rows 1-50 of 112 ...]`. `cap_output` (the 3000-character safety net) also puts its note at the top.
 - **Step 5b:** `read_excel` returns 30 rows at a time and says which `start_row` to call next. `max_rows` can't go above the page size.
 - **Step 5c:** `search_files` finds a word across text, PDF and Excel files and returns only the matching lines, each with its file and page or row. The model can search five PDFs in one call instead of reading them one by one.
+- **Step 5d:** `context.py` estimates the size of each request (characters ÷ 4) and trims it to fit before every model call: old tool results become one-line stubs, then whole old turns are dropped. The newest turn and the system prompt always stay. The CLI shows `[context ~N of 8192 tokens]` after each answer.

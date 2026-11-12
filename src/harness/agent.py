@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Sequence
 
+from harness.context import REPLY_RESERVE, estimate_tokens, fit_to_budget
 from harness.model import ChatModel, Message
 from harness.tools import Tool, run_tool_call
 
@@ -21,6 +22,8 @@ class Agent:
         tools: Sequence[Tool] = (),
         max_steps: int = 10,
         on_tool_call: Callable[[str, str, str], None] | None = None,
+        context_window: int | None = None,
+        on_trim: Callable[[int], None] | None = None,
     ):
         self.model = model
         self.system_prompt = system_prompt
@@ -28,6 +31,10 @@ class Agent:
         self.max_steps = max_steps
         # Called as on_tool_call(name, arguments, result), so the CLI can show what happens.
         self.on_tool_call = on_tool_call
+        # None means no trimming: the whole history goes to the model every time.
+        self.context_window = context_window
+        self.on_trim = on_trim  # called with the number of messages changed, so the CLI can say so
+        self.context_tokens = 0  # the estimate for the most recent model call
         self.messages: list[Message] = []
         self.reset()
 
@@ -45,6 +52,7 @@ class Agent:
         schemas = [tool.schema() for tool in self.tools.values()] or None
 
         for _ in range(self.max_steps):
+            turn = self._fit(turn, schemas)
             reply = self.model.complete(turn, schemas)
             turn.append(reply)
 
@@ -65,3 +73,14 @@ class Agent:
         stop = f"Stopped after {self.max_steps} tool steps without a final answer."
         self.messages = turn + [{"role": "assistant", "content": stop}]
         return stop
+
+    def _fit(self, turn: list[Message], schemas: list[dict] | None) -> list[Message]:
+        """Make the turn fit the context window before sending it. Trimmed messages stay trimmed."""
+        if self.context_window is not None:
+            # The tool schemas go in every request too, and the answer needs room.
+            budget = self.context_window - REPLY_RESERVE - estimate_tokens([], schemas)
+            turn, changes = fit_to_budget(turn, budget)
+            if changes and self.on_trim:
+                self.on_trim(changes)
+        self.context_tokens = estimate_tokens(turn, schemas)
+        return turn

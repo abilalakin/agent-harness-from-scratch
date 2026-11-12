@@ -52,6 +52,8 @@ def run_repl(
             continue
 
         write(f"agent> {answer or '(no reply)'}")
+        if agent.context_window:
+            write(f"  [context ~{agent.context_tokens} of {agent.context_window} tokens]")
 
 
 def show_tool_call(name: str, arguments: str, result: str) -> None:
@@ -93,6 +95,8 @@ def main() -> None:
         tools=[*BUILTIN_TOOLS, *make_file_tools(settings.data_dir), *sql_tools],
         max_steps=settings.max_steps,
         on_tool_call=show_tool_call,
+        context_window=settings.context_window,
+        on_trim=lambda n: print(f"  [context] shortened {n} old message(s) to fit"),
     )
     try:
         run_repl(agent)

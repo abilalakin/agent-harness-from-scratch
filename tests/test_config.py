@@ -33,3 +33,8 @@ def test_sql_via_default_override_and_bad_value():
     assert load_settings({"HARNESS_SQL_VIA": "mcp"}).sql_via == "mcp"
     with pytest.raises(ValueError, match="builtin or mcp"):
         load_settings({"HARNESS_SQL_VIA": "both"})
+
+
+def test_context_window_default_and_override():
+    assert load_settings({}).context_window == 8192
+    assert load_settings({"HARNESS_CONTEXT_WINDOW": "4096"}).context_window == 4096

@@ -2,7 +2,8 @@ import pytest
 
 from fakes import FakeModel
 from harness.agent import SYSTEM_PROMPT, Agent
-from harness.tools import BUILTIN_TOOLS
+from harness.context import REPLY_RESERVE
+from harness.tools import BUILTIN_TOOLS, Tool
 
 
 def test_ask_returns_reply_and_keeps_history():
@@ -78,3 +79,30 @@ def test_failure_mid_tool_loop_leaves_history_unchanged():
     with pytest.raises(RuntimeError):
         agent.ask("1+1?")
     assert len(agent.messages) == 1
+
+
+BIG = Tool("big", "", {"type": "object", "properties": {}}, lambda: "z" * 4000)
+
+
+def three_big_calls_then_answer():
+    return FakeModel(
+        [tool_reply("big", "{}", id="c1"), tool_reply("big", "{}", id="c2"), tool_reply("big", "{}", id="c3"),
+         {"role": "assistant", "content": "done"}]
+    )
+
+
+def test_agent_trims_before_calling_model_and_reports_it():
+    model = three_big_calls_then_answer()
+    trims = []
+    agent = Agent(model, tools=[BIG], context_window=REPLY_RESERVE + 1800, on_trim=trims.append)
+    agent.ask("go")
+    last_sent = model.calls[-1]["messages"]
+    assert any("[old result removed to save space" in (m.get("content") or "") for m in last_sent)
+    assert trims and agent.context_tokens > 0
+
+
+def test_agent_without_context_window_never_trims():
+    model = three_big_calls_then_answer()
+    Agent(model, tools=[BIG]).ask("go")
+    tool_messages = [m for m in model.calls[-1]["messages"] if m["role"] == "tool"]
+    assert len(tool_messages) == 3 and all(len(m["content"]) >= 3000 for m in tool_messages)
