@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from openai.types.chat import ChatCompletion
 
 from harness.config import Settings
-from harness.model import OpenAIChatModel, strip_thinking
+from harness.model import OpenAIChatModel, split_thinking
 
 
 class StubClient:
@@ -27,17 +27,17 @@ class StubClient:
         )
 
 
-def test_strip_thinking_removes_block():
-    assert strip_thinking("<think>hmm</think>\n\nHello") == "Hello"
+def test_split_thinking_separates_block_from_answer():
+    assert split_thinking("<think>hmm</think>\n\nHello") == ("hmm", "Hello")
 
 
-def test_strip_thinking_keeps_plain_text_and_none():
-    assert strip_thinking("Hello") == "Hello"
-    assert strip_thinking(None) is None
+def test_split_thinking_keeps_plain_text_and_none():
+    assert split_thinking("Hello") == ("", "Hello")
+    assert split_thinking(None) == ("", None)
 
 
-def test_strip_thinking_unclosed_block_is_all_thinking():
-    assert strip_thinking("<think>never closed") == ""
+def test_split_thinking_unclosed_block_is_all_thinking():
+    assert split_thinking("<think>never closed") == ("never closed", "")
 
 
 def test_complete_converts_text_reply_and_omits_empty_tools():
@@ -63,3 +63,24 @@ def test_complete_converts_tool_calls():
     assert msg["tool_calls"][0]["id"] == "c1"
     assert msg["tool_calls"][0]["function"] == {"name": "calculate", "arguments": '{"a": 1}'}
     assert stub.last_kwargs["tools"] == tools
+
+
+def test_thinking_from_the_reasoning_field_goes_to_on_thinking():
+    stub = StubClient({"role": "assistant", "content": "51.", "reasoning": "17*3: 10*3 + 7*3 = 51"})
+    seen = []
+    msg = OpenAIChatModel(Settings(), client=stub, on_thinking=seen.append).complete([{"role": "user", "content": "?"}])
+    assert seen == ["17*3: 10*3 + 7*3 = 51"] and msg == {"role": "assistant", "content": "51."}
+
+
+def test_inline_think_block_also_goes_to_on_thinking():
+    stub = StubClient({"role": "assistant", "content": "<think>hmm</think>Hi"})
+    seen = []
+    OpenAIChatModel(Settings(), client=stub, on_thinking=seen.append).complete([{"role": "user", "content": "?"}])
+    assert seen == ["hmm"]
+
+
+def test_no_thinking_means_no_call():
+    stub = StubClient({"role": "assistant", "content": "Hi"})
+    seen = []
+    OpenAIChatModel(Settings(), client=stub, on_thinking=seen.append).complete([{"role": "user", "content": "?"}])
+    assert seen == []

@@ -3,7 +3,7 @@ import openai
 
 from fakes import BIG, FakeModel, tool_reply
 from harness.agent import Agent
-from harness.cli import run_repl
+from harness.cli import run_repl, show_thinking
 from harness.context import REPLY_RESERVE
 
 
@@ -82,3 +82,8 @@ def test_repl_reports_trimming_through_write():
 def test_repl_warns_when_the_newest_turn_alone_is_over_budget():
     out = run(Agent(FakeModel([reply("x")]), context_window=3000), ["q" * 20000, "/exit"])
     assert any("over budget" in line for line in out)
+
+
+def test_show_thinking_prints_it_indented(capsys):
+    show_thinking("first line\nsecond line")
+    assert capsys.readouterr().out == "  [thinking] first line\n             second line\n"

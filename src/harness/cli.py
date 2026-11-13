@@ -68,6 +68,14 @@ def show_tool_call(name: str, arguments: str, result: str) -> None:
     print(f"  [tool] {name}({arguments}) -> {short}")
 
 
+def show_thinking(text: str) -> None:
+    """Print the model's reasoning before its tool calls and answer, so the wait is not a black box."""
+    first, *rest = text.strip().splitlines()
+    print(f"  [thinking] {first}")
+    for line in rest:
+        print(f"             {line}")
+
+
 def start_erp_mcp_server(db_path: Path) -> McpConnection:
     """Start erp-mcp as a subprocess. Its log lines go to logs/mcp-erp.log, not your terminal."""
     Path("logs").mkdir(exist_ok=True)
@@ -97,7 +105,7 @@ def main() -> None:
         print("SQL tools: built in (set HARNESS_SQL_VIA=mcp to use the MCP server)")
 
     agent = Agent(
-        OpenAIChatModel(settings),
+        OpenAIChatModel(settings, on_thinking=show_thinking),
         tools=[*BUILTIN_TOOLS, *make_file_tools(settings.data_dir), *sql_tools],
         max_steps=settings.max_steps,
         on_tool_call=show_tool_call,
