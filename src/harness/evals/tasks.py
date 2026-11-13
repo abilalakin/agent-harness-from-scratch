@@ -152,12 +152,12 @@ TASKS = [
         "excel-row-count",
         "How many rows, including the header, does the Customers sheet of the legacy customer export have?",
         contains("56"),
-        paged_through_excel,
+        called("read_excel"),  # the first page's note already says "of 56", so one call is honest work
     ),
     # Free text. This check is weak on purpose; a model judge takes over in 6c.
     Task(
         "contract-summary",
-        "Summarize the supply agreement in three short bullet points.",
+        "Summarize the supply agreement's payment terms, late payment penalty and governing law in three short bullet points.",
         contains("Germany"),
         called("read_pdf", "supply-agreement"),
         rubric=(

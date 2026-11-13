@@ -30,11 +30,20 @@ class RawLog:
 
     def __init__(self, path: Path, meta: dict[str, str]):
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.file = path.open("w")
+        self.meta = meta
+        self.file = path.open("w+")
         self._write({"meta": meta})
 
     def add(self, result: RunResult) -> None:
         self._write(to_json(result))
+
+    def rewrite(self, results: list[RunResult]) -> None:
+        """Start the file over with these results. Used after the judge has changed verdicts."""
+        self.file.seek(0)
+        self.file.truncate()
+        self._write({"meta": self.meta})
+        for result in results:
+            self.add(result)
 
     def _write(self, record: dict) -> None:
         self.file.write(json.dumps(record) + "\n")
@@ -95,9 +104,10 @@ def main(argv: list[str] | None = None) -> None:
         log=partial(print, flush=True),  # flush: when the output goes to a file, tail -f should still show progress
         on_result=raw.add,
     )
-    raw.file.close()
     if args.judge:
         judge_results(OpenAIChatModel(settings), results, tasks)
+        raw.rewrite(results)  # the log must carry the judge's verdicts, not the checker's
+    raw.file.close()
 
     report_path = Path("docs/evals") / f"{stem}.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)

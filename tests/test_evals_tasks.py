@@ -95,3 +95,9 @@ def test_paging_means_read_excel_at_least_twice():
 
 def test_every_task_has_a_trajectory_check():
     assert all(t.trajectory for t in TASKS)
+
+
+def test_row_count_needs_one_read_excel_because_the_note_gives_the_total():
+    # read_excel's first page says "[rows 1-30 of 56 ...]". Answering 56 from that is right, not skipped work.
+    assert task_by_id("excel-row-count").trajectory([ToolCall("read_excel", "{}", "")])
+    assert not task_by_id("excel-row-count").trajectory([ToolCall("run_sql", "{}", "")])

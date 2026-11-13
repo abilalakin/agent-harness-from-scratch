@@ -112,6 +112,8 @@ def test_main_judge_flag_lets_the_judge_override_the_checker(tmp_path, monkeypat
     main(["--runs", "1", "--task", "contract-summary", "--judge", "--label", "test"])
     report = next((tmp_path / "docs" / "evals").glob("*-test.md")).read_text()
     assert "| contract-summary | 0 of 1 |" in report and "no penalty" in report and "- judge: yes" in report
+    raw = next((tmp_path / "logs" / "evals").glob("*-test.jsonl")).read_text().splitlines()
+    assert '"judge_reason": "no penalty"' in raw[1] and '"passed": false' in raw[1]  # the log carries the verdict too
 
 
 def test_main_check_judge_runs_no_tasks(tmp_path, monkeypatch, capsys):
