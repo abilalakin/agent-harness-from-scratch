@@ -90,3 +90,40 @@ A judge is a model, with a model's biases. The known ones: long answers look tho
 6. The correct answer plus "I checked every page carefully" (pass: self-praise is not a rubric point).
 
 `uv run evals --check-judge` prints a table of hand grade against judge grade. Where they disagree is where the judge cannot be trusted, and that is a fact about the judge that you want to know before it grades a hundred runs.
+
+## 6d: Benchmarking, one thing at a time
+
+A benchmark is the same task set run with one thing changed. One thing, so the difference in the numbers has one cause. `uv run evals --compare a.jsonl b.jsonl ...` puts the runs side by side, one row each, with the meta that says what was different: model, prompt, context window, commit.
+
+Three comparisons against the baseline:
+
+| what changes | how |
+|---|---|
+| the model | `HARNESS_MODEL=qwen3:4b uv run evals --label qwen3-4b` (half the size, after `ollama pull qwen3:4b`) |
+| the prompt | `uv run evals --system-prompt docs/evals/prompts/strict.txt --label strict-prompt`: the default prompt plus "Never report a result you did not get from a tool. If a question is about several files, say which ones you actually read." |
+| the harness | `HARNESS_CONTEXT_WINDOW=3500 uv run evals --label window-3500`: the harness trims on every task, while Ollama's real window stays at 8192, so only the harness changes |
+
+The harness version is the fourth axis, and it runs across time rather than across one afternoon: every report records its git commit, and every later step reruns the baseline and adds a row. That is how step 7 (a `run_python` tool) or step 10 (semantic search) will show whether they helped.
+
+### Reading the numbers
+
+The design doc's warning applies: five runs of an 8B model swing. One run in five is noise. A change counts as real when it moves several tasks the same way, or moves one task from 0 of 5 to 5 of 5. Tokens and seconds move with tool calls, so a cheaper run with the same pass count is a win too.
+
+## What we saw with qwen3:8b
+
+The baseline (`docs/evals/2026-11-13-baseline.md`, 12 tasks, 5 runs each, about 55 minutes):
+
+| group | result | what happened |
+|---|---|---|
+| five database questions | 25 of 25, 2 tool calls each | `describe_tables`, then one query. Solid. The step 3 "50 invoices" mistake is gone. |
+| invoice-3-pdf-total | 5 of 5, 1 tool call | One `read_pdf`. |
+| invoice-mismatch | 4 of 5, trajectory 4 of 5 | The failed run is the step 5 fake, word for word: "The first two invoices checked (INV-2026-0001 and INV-2026-0002) match their ERP totals." The trajectory check caught it too: 2 PDFs read, not 5. |
+| contract-penalty, contract-notice | 3 of 5 and 1 of 5, trajectory 5 of 5 | The model did the right thing (searched the contract) and still failed. `search_files` for "days notice" or "notice period" finds nothing: the PDF says "90 days written notice". After three or four failed searches the model gave up and said the data doesn't have it. The one run that passed searched for the single word "notice". |
+| excel-empty-rows, excel-row-count | 0 of 5, 0 of 5 | The question says "legacy customer export". The file is `legacy/customers_export.xlsx`. The model never called `list_files` and instead queried a database table `legacy_customer_export` (which doesn't exist), then the `customers` table, and answered "0 rows with an empty name". Confidently wrong, from the wrong source. |
+| the last 8 runs | errors | Ollama was killed by the kernel's out-of-memory killer during run 3 of excel-row-count (`journalctl -u ollama` shows `oom-kill`). Every run after that was a connection error in 2 seconds. |
+
+Three lessons from one hour of GPU time:
+
+1. **The failure kinds are different, and the report tells them apart.** Database questions pass. The invoice check fails by skipping work (trajectory). The contract questions fail with the trajectory fine (the tool is too weak for the wording). The Excel questions fail by never looking (wrong source). A single pass rate of 38 of 60 would hide all of that.
+2. **Keyword search is the weak link.** Two tasks fail because "notice period" does not match "90 days written notice". This is the case for step 10, semantic search, and now there is a number to beat.
+3. **An eval harness needs to count errors apart from failures.** The first version of the report showed `contract-summary: 0 of 5` with no hint that the model never ran. The report now shows `0 of 5 (5 errors)` and `8 errored` in the totals line. The lost runs were rerun separately.

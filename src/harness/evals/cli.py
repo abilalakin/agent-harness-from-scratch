@@ -10,7 +10,7 @@ from pathlib import Path
 from harness.agent import SYSTEM_PROMPT, Agent
 from harness.config import Settings, load_settings
 from harness.evals.judge import check_judge, judge_results
-from harness.evals.report import to_json, write_report
+from harness.evals.report import compare, to_json, write_report
 from harness.evals.runner import RunResult, run_all
 from harness.evals.tasks import TASKS, task_by_id
 from harness.file_tools import make_file_tools
@@ -56,8 +56,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--system-prompt", type=Path, help="a file with a system prompt to use instead of the default")
     parser.add_argument("--judge", action="store_true", help="let a model judge grade the tasks that have a rubric")
     parser.add_argument("--check-judge", action="store_true", help="grade the hand-graded answers and stop")
+    parser.add_argument("--compare", nargs="+", type=Path, metavar="JSONL", help="print one table over these raw logs and stop")
     args = parser.parse_args(argv)
 
+    if args.compare:
+        print(compare(args.compare), end="")
+        return
     settings = load_settings()
     if args.check_judge:
         disagreements = check_judge(OpenAIChatModel(settings))
