@@ -19,6 +19,7 @@ dependencies = [
 harness = "harness.cli:main"
 make-data = "harness.practice_data:main"
 erp-mcp = "harness.mcp_server:main"
+evals = "harness.evals.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.11.23,<0.12.0"]

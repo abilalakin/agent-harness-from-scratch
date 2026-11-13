@@ -1,6 +1,7 @@
 import pytest
 from fakes import FakeModel, tool_reply
 from harness.agent import Agent
+from harness.evals.cli import main
 from harness.evals.runner import TokenCounter, run_all, run_task
 from harness.evals.tasks import Task, contains
 from harness.tools import BUILTIN_TOOLS, Tool
@@ -64,3 +65,19 @@ def test_token_counter_adds_up_every_call():
     counter.complete([{"role": "user", "content": "x" * 400}])
     counter.complete([{"role": "user", "content": "x" * 400}])
     assert counter.calls == 2 and 200 <= counter.tokens <= 230
+
+
+def test_main_refuses_an_unknown_task_id(capsys):
+    with pytest.raises(SystemExit) as e:
+        main(["--task", "typo"])
+    assert e.value.code == 2 and "invoice-count" in capsys.readouterr().err
+
+
+def test_main_writes_raw_log_and_report(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    fake = lambda settings, system_prompt: Agent(FakeModel([{"role": "assistant", "content": "112"}]), max_steps=2)
+    monkeypatch.setattr("harness.evals.cli.build_agent", fake)
+    main(["--runs", "1", "--task", "invoice-count", "--label", "test"])
+    report = next((tmp_path / "docs" / "evals").glob("*-test.md")).read_text()
+    raw = next((tmp_path / "logs" / "evals").glob("*-test.jsonl")).read_text().splitlines()
+    assert "| invoice-count | 1 of 1 |" in report and '"meta"' in raw[0] and len(raw) == 2
