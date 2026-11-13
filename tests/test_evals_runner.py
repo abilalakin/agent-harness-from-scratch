@@ -81,3 +81,23 @@ def test_main_writes_raw_log_and_report(tmp_path, monkeypatch):
     report = next((tmp_path / "docs" / "evals").glob("*-test.md")).read_text()
     raw = next((tmp_path / "logs" / "evals").glob("*-test.jsonl")).read_text().splitlines()
     assert "| invoice-count | 1 of 1 |" in report and '"meta"' in raw[0] and len(raw) == 2
+
+
+def test_run_all_hands_each_result_over_as_soon_as_it_is_done():
+    seen = []
+    run_all([TASK], make_agent([{"role": "assistant", "content": "4"}]), runs=2, log=lambda s: None, on_result=seen.append)
+    assert [r.run for r in seen] == [1, 2]
+
+
+def test_main_saves_each_run_before_the_next_starts(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    lines_when_second_run_started = []
+
+    def fake(settings, system_prompt):
+        raw = list((tmp_path / "logs" / "evals").glob("*.jsonl"))
+        lines_when_second_run_started.append(len(raw[0].read_text().splitlines()) if raw else 0)
+        return Agent(FakeModel([{"role": "assistant", "content": "112"}]), max_steps=2)
+
+    monkeypatch.setattr("harness.evals.cli.build_agent", fake)
+    main(["--runs", "2", "--task", "invoice-count", "--label", "test"])
+    assert lines_when_second_run_started == [1, 2]  # meta line only, then meta + run 1

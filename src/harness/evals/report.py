@@ -3,8 +3,8 @@
 from dataclasses import asdict
 from statistics import mean
 
-from harness.evals.runner import RunResult, ToolCall
-from harness.evals.tasks import Task
+from harness.evals.runner import RunResult
+from harness.evals.tasks import Task, ToolCall
 
 QUOTE_CHARS = 300  # how much of a failed answer the report shows
 
@@ -25,16 +25,28 @@ def _mean(values: list[float]) -> str:
 def write_report(results: list[RunResult], tasks: list[Task], meta: dict[str, str]) -> str:
     lines = [f"# Evals: {meta.get('label', 'run')}", ""]
     lines += [f"- {key}: {value}" for key, value in meta.items()]
-    lines += ["", "| task | passed | tool calls | tokens | seconds |", "|---|---|---|---|---|"]
+    lines += ["", "| task | passed | trajectory | tool calls | tokens | seconds |", "|---|---|---|---|---|---|"]
 
     for task in tasks:
         runs = [r for r in results if r.task_id == task.id]
         passed = sum(r.passed for r in runs)
+        checked = [r for r in runs if r.trajectory_ok is not None]
+        trajectory = f"{sum(r.trajectory_ok for r in checked)} of {len(checked)}" if checked else "-"
         lines.append(
-            f"| {task.id} | {passed} of {len(runs)} | {_mean([len(r.calls) for r in runs])} "
+            f"| {task.id} | {passed} of {len(runs)} | {trajectory} | {_mean([len(r.calls) for r in runs])} "
             f"| {_mean([r.tokens for r in runs])} | {_mean([r.seconds for r in runs])} |"
         )
-    lines += ["", f"**Total: {sum(r.passed for r in results)} of {len(results)} runs passed**"]
+    total = f"**Total: {sum(r.passed for r in results)} of {len(results)} runs passed"
+    checked = [r for r in results if r.trajectory_ok is not None]
+    if checked:
+        total += f", trajectory ok in {sum(r.trajectory_ok for r in checked)} of {len(checked)}"
+    lines += ["", total + "**"]
+
+    # The interesting failures: the answer was right, but the work was skipped.
+    skipped = [r for r in results if r.passed and r.trajectory_ok is False]
+    if skipped:
+        lines += ["", "## Right answer, skipped work", ""]
+        lines += [f"- {r.task_id} run {r.run}, calls: {', '.join(c.name for c in r.calls) or '(none)'}" for r in skipped]
 
     # One failed answer per task, so the report says what "failed" looked like without opening the raw log.
     failures = []

@@ -12,17 +12,10 @@ from dataclasses import dataclass
 
 from harness.agent import Agent
 from harness.context import estimate_tokens
-from harness.evals.tasks import Task
+from harness.evals.tasks import Task, ToolCall
 from harness.model import ChatModel, Message
 
 STORED_RESULT_CHARS = 500  # tool results in the log are cut: enough to see what came back, not the whole thing
-
-
-@dataclass(frozen=True)
-class ToolCall:
-    name: str
-    arguments: str
-    result: str
 
 
 @dataclass
@@ -77,7 +70,7 @@ def run_task(task: Task, make_agent: Callable[[], Agent], run: int = 1) -> RunRe
         answer=answer,
         calls=calls,
         passed=error is None and task.check(answer),
-        trajectory_ok=None,
+        trajectory_ok=task.trajectory(calls) if task.trajectory else None,
         tokens=counter.tokens,
         model_calls=counter.calls,
         seconds=seconds,
@@ -86,14 +79,23 @@ def run_task(task: Task, make_agent: Callable[[], Agent], run: int = 1) -> RunRe
 
 
 def run_all(
-    tasks: list[Task], make_agent: Callable[[], Agent], runs: int = 5, log: Callable[[str], None] = print
+    tasks: list[Task],
+    make_agent: Callable[[], Agent],
+    runs: int = 5,
+    log: Callable[[str], None] = print,
+    on_result: Callable[[RunResult], None] = lambda result: None,
 ) -> list[RunResult]:
-    """Every task, `runs` times each, one after the other. One log line per run so you can watch progress."""
+    """Every task, `runs` times each, one after the other.
+
+    One log line per run so you can watch progress, and on_result gets each result as soon as it
+    exists, so a run that is killed after forty minutes still leaves forty minutes of results.
+    """
     results = []
     for task in tasks:
         for run in range(1, runs + 1):
             result = run_task(task, make_agent, run)
             results.append(result)
+            on_result(result)
             status = "pass" if result.passed else "FAIL"
             log(f"{task.id} run {run}: {status} ({result.seconds:.0f}s, {len(result.calls)} tool calls)")
     return results

@@ -40,3 +40,27 @@ Nothing in `agent.py` changed for this step. The runner (`src/harness/evals/runn
 1. `src/harness/evals/tasks.py`: the checkers, then the table of tasks.
 2. `src/harness/evals/runner.py`: `TokenCounter`, `run_task`, `run_all`.
 3. `tests/test_evals_tasks.py`: the test that pins the expected answers to the generator.
+
+## 6b: Scoring what the agent did
+
+### The problem with answer checks
+
+In step 5 the model answered "only INV-2026-0003 is off" after reading two of the five PDFs. The answer was right. The work was not done. An answer checker gives that run a pass, and a pass is exactly the wrong signal: it rewards a guess that happened to land.
+
+### What changed
+
+A task can now carry a second check that looks at the recorded tool calls instead of the answer text:
+
+```python
+Task("invoice-mismatch", "Does every invoice PDF ... match ...?", contains("INV-2026-0003"), looked_at_every_invoice)
+```
+
+`looked_at_every_invoice` passes if `read_pdf` was called for each of the five invoices, or if `search_files` was run over them. Both are honest ways to do the work. Two PDFs and a guess is not.
+
+The other tasks get simpler checks: `called("run_sql")` for database questions, `paged_through_excel` (at least two `read_excel` calls, since the sheet has two pages) for the Excel ones. They are all in `src/harness/evals/tasks.py`, above the task table.
+
+The report gets a `trajectory` column next to `passed`, and a section **Right answer, skipped work** that lists every run where the answer passed but the trajectory did not. That list is the point of 6b: it is the fake thoroughness from step 5, counted.
+
+### Why both checks, not one
+
+A trajectory check alone would reward a model that reads all five PDFs and then answers wrong. An answer check alone rewards the guess. A run is good when both pass, and the two failure kinds mean different things: a wrong answer is a reasoning or reading problem, a skipped trajectory is the model not doing what it said. They get different fixes (a stricter prompt, a different tool, a bigger model), so they are counted apart.

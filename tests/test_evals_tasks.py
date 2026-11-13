@@ -1,7 +1,18 @@
 import sqlite3
 
 import pytest
-from harness.evals.tasks import TASKS, all_of, contains, number_near, task_by_id
+
+from harness.evals.tasks import (
+    TASKS,
+    ToolCall,
+    all_of,
+    called,
+    contains,
+    looked_at_every_invoice,
+    number_near,
+    paged_through_excel,
+    task_by_id,
+)
 from harness.file_tools import read_excel, read_pdf
 from harness.practice_data import make_all
 
@@ -56,3 +67,31 @@ def test_expected_answers_match_the_generated_data(tmp_path):
     )
     assert "Total: 13701.44 EUR" in read_pdf(tmp_path, "invoices/INV-2026-0003.pdf")
     assert "of 56" in read_excel(tmp_path, "legacy/customers_export.xlsx").splitlines()[1]  # header + 55 rows
+
+
+# --- Trajectory checks: what the agent did, not what it said ---------------
+
+
+def pdf(n):
+    return ToolCall("read_pdf", f'{{"path": "invoices/INV-2026-000{n}.pdf"}}', "")
+
+
+def test_called_matches_name_and_arguments():
+    assert called("read_pdf", "0003")([pdf(3)])
+    assert not called("read_pdf", "0003")([pdf(2)])
+    assert called("run_sql")([ToolCall("run_sql", "{}", "")]) and not called("run_sql")([])
+
+
+def test_every_invoice_means_all_five_pdfs_or_a_search():
+    assert looked_at_every_invoice([pdf(n) for n in range(1, 6)])
+    assert not looked_at_every_invoice([pdf(1), pdf(2)])  # the step 5 fake
+    assert looked_at_every_invoice([ToolCall("search_files", '{"query": "Total", "path": "invoices"}', "")])
+
+
+def test_paging_means_read_excel_at_least_twice():
+    one = ToolCall("read_excel", "{}", "")
+    assert paged_through_excel([one, one]) and not paged_through_excel([one])
+
+
+def test_every_task_has_a_trajectory_check():
+    assert all(t.trajectory for t in TASKS)

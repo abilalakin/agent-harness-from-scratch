@@ -4,6 +4,7 @@ import argparse
 import json
 import subprocess
 from datetime import date
+from functools import partial
 from pathlib import Path
 
 from harness.agent import SYSTEM_PROMPT, Agent
@@ -23,13 +24,20 @@ def build_agent(settings: Settings, system_prompt: str = SYSTEM_PROMPT) -> Agent
     return Agent(model, system_prompt, tools, max_steps=settings.max_steps, context_window=settings.context_window)
 
 
-def save_raw(path: Path, results: list[RunResult], meta: dict[str, str]) -> None:
-    """JSON lines: the meta first, then one line per run. Enough to rebuild any report later."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w") as f:
-        f.write(json.dumps({"meta": meta}) + "\n")
-        for result in results:
-            f.write(json.dumps(to_json(result)) + "\n")
+class RawLog:
+    """JSON lines on disk: the meta first, then one line per run, written the moment the run ends."""
+
+    def __init__(self, path: Path, meta: dict[str, str]):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.file = path.open("w")
+        self._write({"meta": meta})
+
+    def add(self, result: RunResult) -> None:
+        self._write(to_json(result))
+
+    def _write(self, record: dict) -> None:
+        self.file.write(json.dumps(record) + "\n")
+        self.file.flush()  # so a killed run keeps every finished result
 
 
 def _git_commit() -> str:
@@ -65,10 +73,17 @@ def main(argv: list[str] | None = None) -> None:
         "commit": _git_commit() or "unknown",
     }
 
-    results = run_all(tasks, lambda: build_agent(settings, system_prompt), runs=args.runs)
-
     stem = f"{meta['date']}-{label}"
-    save_raw(Path("logs/evals") / f"{stem}.jsonl", results, meta)
+    raw = RawLog(Path("logs/evals") / f"{stem}.jsonl", meta)
+    results = run_all(
+        tasks,
+        lambda: build_agent(settings, system_prompt),
+        runs=args.runs,
+        log=partial(print, flush=True),  # flush: when the output goes to a file, tail -f should still show progress
+        on_result=raw.add,
+    )
+    raw.file.close()
+
     report_path = Path("docs/evals") / f"{stem}.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(write_report(results, tasks, meta))
