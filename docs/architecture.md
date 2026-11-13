@@ -7,7 +7,7 @@ flowchart LR
     User([You]) -- types --> CLI["cli.run_repl<br/>read, print, /reset, /exit<br/>prints [tool] lines"]
     CLI -- "ask(text)" --> Agent["Agent<br/>messages: list of dicts<br/>(system, user, assistant, tool, ...)"]
     Agent -- "history + tool schemas" --> Fit["context.fit_to_budget<br/>over budget? shorten old tool<br/>results, then drop old turns"]
-    Fit -- "fits in 8192 - 2000 reserve" --> Model["OpenAIChatModel<br/>strips &lt;think&gt; blocks"]
+    Fit -- "fits in 8192 - 2000 reserve" --> Model["OpenAIChatModel<br/>reasoning → on_thinking<br/>([thinking] lines in the CLI)"]
     Model -- "HTTP POST /v1/chat/completions" --> Ollama["Ollama<br/>qwen3:8b on the GPU<br/>localhost:11434"]
     Ollama -. "answer, or tool_calls" .-> Model
     Model -. reply .-> Agent
@@ -31,11 +31,26 @@ flowchart LR
     AnyClient(["Claude Code, MCP Inspector,<br/>any MCP client"]) -- "MCP: JSON-RPC over stdio<br/>initialize, tools/list, tools/call" --> McpTools
 
     MakeData["uv run make-data<br/>practice_data.py, seed 42"] --> Data[("data/<br/>erp.db, invoices/*.pdf,<br/>contracts/*.pdf, legacy/*.xlsx")]
+
+    subgraph Evals["uv run evals (evals/, step 6)"]
+        Tasks["tasks.py<br/>12 questions, answer checks,<br/>trajectory checks"]
+        EvRunner["runner.py<br/>fresh Agent per run,<br/>TokenCounter wraps the model,<br/>tool calls via on_tool_call"]
+        Judge["judge.py<br/>a model grades free text<br/>against a rubric; checked<br/>against hand-graded answers"]
+        Report["report.py<br/>4 of 5 per task, errors apart,<br/>--compare across runs"]
+    end
+    Tasks --> EvRunner
+    EvRunner -- "ask(question), N times" --> Agent
+    EvRunner --> Judge
+    Judge -- "one call, no tools" --> Model
+    EvRunner --> Report
+    Report --> Out[("docs/evals/*.md<br/>logs/evals/*.jsonl")]
 ```
 
 The file tools read the files in `data/`. The SQL tools read `erp.db`, and the database itself refuses every write. They reach the database one of two ways: built in, inside the harness process, or through the `erp-mcp` server, which the harness starts as a subprocess. To the agent, both look like normal tools.
 
 The agent loops between the model and the tools until the model answers without asking for a tool, or until `max_steps` model calls are used up.
+
+The evals sit on top of all of this and change none of it. The runner builds the same agent the CLI builds, asks each question N times on a fresh agent, and measures from the outside: tool calls through the `on_tool_call` hook, tokens by wrapping the model.
 
 ## What changed
 
@@ -51,3 +66,4 @@ The agent loops between the model and the tools until the model answers without 
 - **Step 5b:** `read_excel` returns 30 rows at a time and says which `start_row` to call next. `max_rows` can't go above the page size.
 - **Step 5c:** `search_files` finds a word across text, PDF and Excel files and returns only the matching lines, each with its file and page or row. The model can search five PDFs in one call instead of reading them one by one.
 - **Step 5d:** `context.py` estimates the size of each request (characters ÷ 4) and trims it to fit before every model call: old tool results become one-line stubs, then whole old turns are dropped. The newest turn and the system prompt always stay. The CLI shows `[context ~N of 8192 tokens]` after each answer.
+- **Step 6:** Evals. `uv run evals` runs twelve questions over the practice data N times each and writes a report: `4 of 5` per task, a trajectory column for what the agent did (did it read all five PDFs?), errors counted apart from wrong answers, and the first failed answer quoted. A model judge grades the free-text task against a rubric, and is checked against six hand-graded answers first. `--compare` puts several runs side by side, one variable per run: model, prompt, context window, commit.

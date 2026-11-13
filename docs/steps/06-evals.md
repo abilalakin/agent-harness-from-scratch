@@ -91,6 +91,14 @@ A judge is a model, with a model's biases. The known ones: long answers look tho
 
 `uv run evals --check-judge` prints a table of hand grade against judge grade. Where they disagree is where the judge cannot be trusted, and that is a fact about the judge that you want to know before it grades a hundred runs.
 
+### What we saw
+
+`qwen3:8b` as judge agreed with the hand grade on all six, twice (two separate runs). Padding, terseness and self-praise did not move it, and it caught the invented discount clause. One thing in its reasons is worth knowing: for answer 3 it said the delivery clause was "not specified in the question". The delivery clause is real, it is in the agreement, but the judge never sees the agreement, only the rubric. So the rubric line "no clause that is not in the agreement" is really "no clause that is not in the rubric" to the judge. A true extra fact and an invented one look the same to it. The verdict was right; the reason was only half right.
+
+Judging the summary task itself showed a problem with the *question*, not the model. The first version asked to "summarize the supply agreement in three bullet points". The model summarized page 1 (scope, prices, delivery) and the rubric failed it for not mentioning payment terms: 1 of 5. That is an unfair eval. The question now names what matters (payment terms, late penalty, governing law): 3 of 5 (`docs/evals/2026-11-13-judge.md`). The two failures said the penalty and the law were "not found in available documents" after reading the PDF, which is the model missing text that was in front of it.
+
+The lesson: when a judged task fails, read the failures before blaming the model. The rubric and the question have to ask for the same thing.
+
 ## 6d: Benchmarking, one thing at a time
 
 A benchmark is the same task set run with one thing changed. One thing, so the difference in the numbers has one cause. `uv run evals --compare a.jsonl b.jsonl ...` puts the runs side by side, one row each, with the meta that says what was different: model, prompt, context window, commit.
@@ -109,9 +117,13 @@ The harness version is the fourth axis, and it runs across time rather than acro
 
 The design doc's warning applies: five runs of an 8B model swing. One run in five is noise. A change counts as real when it moves several tasks the same way, or moves one task from 0 of 5 to 5 of 5. Tokens and seconds move with tool calls, so a cheaper run with the same pass count is a win too.
 
+## Seeing the model think
+
+A side change made while running these: the CLI now prints the model's reasoning as `[thinking] ...` lines before each tool call and the answer. Ollama returns Qwen3's thinking in a separate `reasoning` field, and until now the harness threw it away. The reasoning is often the most useful line on the screen: "the user didn't give a timezone, so UTC is safe" tells you why a tool was called with those arguments. Nothing shows until the model has finished the whole reply (there is no streaming yet), so the wait is the same; what changes is that the wait is followed by the why. The `on_thinking` hook sits on `OpenAIChatModel`, next to `on_tool_call` on the agent: the harness reports, the CLI decides what to print.
+
 ## What we saw with qwen3:8b
 
-The baseline (`docs/evals/2026-11-13-baseline.md`, 12 tasks, 5 runs each, about 55 minutes):
+The first baseline (`docs/evals/2026-11-13-first-baseline.md`, 12 tasks, 5 runs each, about 55 minutes):
 
 | group | result | what happened |
 |---|---|---|
@@ -127,3 +139,22 @@ Three lessons from one hour of GPU time:
 1. **The failure kinds are different, and the report tells them apart.** Database questions pass. The invoice check fails by skipping work (trajectory). The contract questions fail with the trajectory fine (the tool is too weak for the wording). The Excel questions fail by never looking (wrong source). A single pass rate of 38 of 60 would hide all of that.
 2. **Keyword search is the weak link.** Two tasks fail because "notice period" does not match "90 days written notice". This is the case for step 10, semantic search, and now there is a number to beat.
 3. **An eval harness needs to count errors apart from failures.** The first version of the report showed `contract-summary: 0 of 5` with no hint that the model never ran. The report now shows `0 of 5 (5 errors)` and `8 errored` in the totals line. The lost runs were rerun separately.
+
+## 6e: The public benchmarks, and why they don't answer our question
+
+You will see three names in every model announcement. What each one measures:
+
+- **MMLU** (Massive Multitask Language Understanding): about 14,000 multiple-choice questions across 57 subjects, from high-school maths to law. It measures knowledge and reading. There are no tools, no files, no multi-step work. A model picks A, B, C or D.
+- **SWE-bench**: real GitHub issues from real Python repos. The model gets the repo and the issue text and has to produce a patch. The patch passes if the repo's own tests pass. It measures agentic coding: reading a codebase, finding the right place, changing it, not breaking the rest. SWE-bench Verified is the human-checked subset.
+- **τ-bench** (tau-bench): tool-using agents in a simulated customer-service setting (airline, retail). A second model plays the customer. The agent has tools over a database and a policy document it must follow. A run passes if the final database state matches the expected one, whatever path the agent took. Scores are reported as **pass^k**: the share of tasks that pass *all* of k tries, which punishes an agent that gets it right one time in three.
+
+Two of those ideas are already in our small set, seen from the other side. τ-bench scores the final state and not the transcript; our trajectory check does the reverse, and both exist because an answer and the work behind it can disagree. pass^k is our "4 of 5" turned into a stricter number: with five runs, pass^5 is 1 only for tasks that never fail.
+
+What none of them can tell you: whether `qwen3:8b` reads five invoices or two, or whether it finds "90 days written notice" when asked about the "notice period". A public score says how a model does on someone else's task, averaged over thousands of cases. Your decision is about your task, your data and your tools. Twelve questions, five runs each, over your own files answer that in an hour, and they keep answering it after every change you make. That is the reason to own a small eval set, even a rough one, before trusting any leaderboard.
+
+## Things to try
+
+- `uv run evals --runs 1 --task invoice-mismatch`, then open the raw log in `logs/evals/` and read the tool calls. Did it read five PDFs, or search, or guess?
+- Write a thirteenth task. Pick a question you asked the agent in an earlier step, decide the right answer, and add a `Task(...)` line. Run it five times.
+- Break the judge on purpose: add a seventh answer to `JUDGE_CHECKS` that is wrong but long and confident, and see whether `--check-judge` catches it.
+- Run `HARNESS_CONTEXT_WINDOW=3500 uv run evals --task invoice-mismatch --label small` and compare it with the baseline row. Trimming has a cost; this shows it.
