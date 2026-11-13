@@ -1,9 +1,9 @@
 import pytest
 
-from fakes import FakeModel
+from fakes import BIG, FakeModel, tool_reply
 from harness.agent import SYSTEM_PROMPT, Agent
 from harness.context import REPLY_RESERVE
-from harness.tools import BUILTIN_TOOLS, Tool
+from harness.tools import BUILTIN_TOOLS
 
 
 def test_ask_returns_reply_and_keeps_history():
@@ -27,15 +27,6 @@ def test_reset_keeps_only_system_message():
     agent.ask("a")
     agent.reset()
     assert agent.messages == [{"role": "system", "content": SYSTEM_PROMPT}]
-
-
-def tool_reply(name, args, id="c1"):
-    """An assistant message that asks for one tool call."""
-    return {
-        "role": "assistant",
-        "content": None,
-        "tool_calls": [{"id": id, "type": "function", "function": {"name": name, "arguments": args}}],
-    }
 
 
 def test_tool_call_then_final_answer():
@@ -79,9 +70,6 @@ def test_failure_mid_tool_loop_leaves_history_unchanged():
     with pytest.raises(RuntimeError):
         agent.ask("1+1?")
     assert len(agent.messages) == 1
-
-
-BIG = Tool("big", "", {"type": "object", "properties": {}}, lambda: "z" * 4000)
 
 
 def three_big_calls_then_answer():

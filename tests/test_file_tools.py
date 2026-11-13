@@ -1,3 +1,4 @@
+import openpyxl
 import pytest
 
 from harness.file_tools import (
@@ -11,7 +12,7 @@ from harness.file_tools import (
     search_files,
 )
 from harness.practice_data import make_all
-from harness.tools import run_tool_call
+from harness.tools import MAX_TOOL_OUTPUT, run_tool_call
 
 
 def test_safe_path_allows_inside(data_dir):
@@ -179,3 +180,26 @@ def test_list_and_search_skip_symlinks_leading_outside(tmp_path):
     (tmp_path / "d" / "link.txt").symlink_to(tmp_path / "secret.txt")
     assert "link.txt" not in list_files(tmp_path / "d")
     assert search_files(tmp_path / "d", "zanzibar") == "(no matches for 'zanzibar')"
+
+
+def test_search_names_the_sheet_when_a_workbook_has_several(tmp_path):
+    make_all(tmp_path / "d")
+    book = openpyxl.Workbook()
+    book.active.title = "Customers"
+    book.active.append(["nothing here"])
+    book.create_sheet("Suppliers").append(["Blue Sky Parts"])
+    book.save(tmp_path / "d" / "legacy" / "two.xlsx")
+    assert search_files(tmp_path / "d", "Blue Sky Parts") == "legacy/two.xlsx sheet Suppliers row 1: Blue Sky Parts"
+
+
+def test_read_excel_page_never_exceeds_the_output_cap(tmp_path):
+    make_all(tmp_path / "d")
+    book = openpyxl.Workbook()
+    for i in range(1, 61):
+        book.active.append([f"r{i}-" + "w" * 200])  # wide rows: 30 of them would be 6000 characters
+    book.save(tmp_path / "d" / "legacy" / "wide.xlsx")
+    out = read_excel(tmp_path / "d", "legacy/wide.xlsx")
+    lines = out.splitlines()
+    last_row = int(lines[-1].split(":")[0])
+    assert len(out) <= MAX_TOOL_OUTPUT
+    assert last_row < 30 and lines[1] == f"[rows 1-{last_row} of 60. Next page: start_row={last_row + 1}]"

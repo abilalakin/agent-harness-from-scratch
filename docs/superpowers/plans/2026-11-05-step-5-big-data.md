@@ -1,4 +1,4 @@
-# Step 5: Big Data — Implementation Plan
+# Step 5: Big Data - Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -66,7 +66,7 @@ docs/steps/05-big-data.md, docs/architecture.md
 
 - [ ] **Step 1: Update the tests to the new format (they fail)**
 
-`tests/test_tools.py` — replace the two cut tests:
+`tests/test_tools.py` - replace the two cut tests:
 ```python
 def test_cap_output_says_so_first():
     out = cap_output("x" * 25, limit=10)
@@ -79,7 +79,7 @@ def test_run_tool_call_caps_long_results():
     assert out.startswith("[cut: showing the first 3000 of 5000 characters.")
 ```
 
-`tests/test_sql_tools.py` — replace `test_more_than_max_rows_is_cut_with_hint`:
+`tests/test_sql_tools.py` - replace `test_more_than_max_rows_is_cut_with_hint`:
 ```python
 def test_more_than_max_rows_says_total_first(db_path):
     lines = run_sql(db_path, "SELECT id FROM orders").splitlines()
@@ -91,9 +91,9 @@ def test_exactly_max_rows_has_no_note(db_path):
     assert lines[0] == "id" and len(lines) == 1 + MAX_ROWS
 ```
 
-- [ ] **Step 2: Run and see them fail.** Run: `uv run pytest -q` — Expected: the 4 tests above FAIL on the old format.
+- [ ] **Step 2: Run and see them fail.** Run: `uv run pytest -q` - Expected: the 4 tests above FAIL on the old format.
 - [ ] **Step 3: Implement both changes.** Update the comment above `MAX_TOOL_OUTPUT` (it no longer says "Step 5 replaces this").
-- [ ] **Step 4: Run and see them pass.** Run: `uv run pytest -q` — Expected: all pass (the MCP tests too, since the server reuses `run_sql`).
+- [ ] **Step 4: Run and see them pass.** Run: `uv run pytest -q` - Expected: all pass (the MCP tests too, since the server reuses `run_sql`).
 - [ ] **Step 5: Manual run.** `uv run harness`: "how many invoices are there, and list their numbers". Expected: the model reports 112, not 50. Write what happened in the step note.
 - [ ] **Step 6: Docs.** Start `docs/steps/05-big-data.md` with part 5a: the step 3 failure ("50 invoices"), why the note goes first (a model reads top-down and a note after 50 rows may be cut or skipped), and why real totals beat "more rows not shown". Diagram: label the result arrow "partial? note first".
 - [ ] **Step 7: Commit** (after the user's OK). Message: `feat: put partial-result notes first, with totals`
@@ -162,9 +162,9 @@ def test_wrong_reader_names_the_right_tool(data_dir, reader, path, right_tool):
         reader(data_dir, path)
 ```
 
-- [ ] **Step 2: Run and see them fail.** Run: `uv run pytest tests/test_file_tools.py -q` — Expected: the new tests FAIL.
+- [ ] **Step 2: Run and see them fail.** Run: `uv run pytest tests/test_file_tools.py -q` - Expected: the new tests FAIL.
 - [ ] **Step 3: Implement.** Use the sheet's `max_row` for the total. Write the row formatting as a plain `for` loop (the old one-line comprehension was hard to read). Add `start_row` and `max_rows` to the `read_excel` tool schema, with descriptions that say "use the start_row from the [rows ...] note".
-- [ ] **Step 4: Run and see them pass.** Run: `uv run pytest -q` — Expected: all pass.
+- [ ] **Step 4: Run and see them pass.** Run: `uv run pytest -q` - Expected: all pass.
 - [ ] **Step 5: Manual run.** "how many new customers are in the legacy export that are not in the database?" Expected: `read_excel` called with `start_row=31` (and maybe 61-style errors handled). Write down whether it pages through and what it concludes.
 - [ ] **Step 6: Docs.** Step note part 5b: paging, why every page repeats the header, why the note says the exact `start_row` to use next (the model copies it), and the "every row is reachable" test.
 - [ ] **Step 7: Commit** (after the user's OK). Message: `feat: page through Excel sheets`
@@ -230,9 +230,9 @@ def test_search_empty_query(data_dir):
 ```
 Also update `test_list_files…`-style tool-count expectations if any test counts `make_file_tools` (none today).
 
-- [ ] **Step 2: Run and see them fail.** Run: `uv run pytest tests/test_file_tools.py -q` — Expected: FAIL, `search_files` missing.
+- [ ] **Step 2: Run and see them fail.** Run: `uv run pytest tests/test_file_tools.py -q` - Expected: FAIL, `search_files` missing.
 - [ ] **Step 3: Implement.** One small generator per file type that yields `(location, text)`; `search_files` walks the files, filters, sorts, formats. A PDF page whose text can't be extracted yields nothing.
-- [ ] **Step 4: Run and see them pass.** Run: `uv run pytest -q` — Expected: all pass.
+- [ ] **Step 4: Run and see them pass.** Run: `uv run pytest -q` - Expected: all pass.
 - [ ] **Step 5: Manual run.** "which files mention Blue Sky?" and "list the total of every invoice PDF". Expected: `search_files` calls instead of five `read_pdf` calls. Note what happens.
 - [ ] **Step 6: Docs.** Step note part 5c: search as the way to handle many files (grep, not read), location in every match so the model can follow up with `read_pdf page=` or `read_excel start_row=`, why the database is left to SQL. Diagram: `search_files` next to the file tools.
 - [ ] **Step 7: Commit** (after the user's OK). Message: `feat: add search_files across text, PDF and Excel`
@@ -347,10 +347,10 @@ def test_agent_without_context_window_never_trims():
 
 `tests/test_cli.py`: with `Agent(FakeModel(...), context_window=8192)`, the output after an answer contains `"[context ~"` and `"of 8192 tokens]"`; with no context window it doesn't.
 
-- [ ] **Step 2: Run and see them fail.** Run: `uv run pytest -q` — Expected: new tests FAIL (`harness.context` missing, new arguments missing).
+- [ ] **Step 2: Run and see them fail.** Run: `uv run pytest -q` - Expected: new tests FAIL (`harness.context` missing, new arguments missing).
 - [ ] **Step 3: Implement `context.py`.** Two stages, each a plain loop. A short comment explains why tool results go first (they're the biggest and the model already used them) and why turns are dropped whole (half a turn breaks the tool-call pairing).
 - [ ] **Step 4: Wire into `Agent`, `Settings`, the CLI.**
-- [ ] **Step 5: Run and see them pass.** Run: `uv run pytest -q` — Expected: all pass.
+- [ ] **Step 5: Run and see them pass.** Run: `uv run pytest -q` - Expected: all pass.
 - [ ] **Step 6: Manual runs.**
   1. The success test: `printf 'does every invoice PDF match the database? compare the totals\n/exit\n' | uv run harness`. Expected: `search_files` (or `read_pdf`) for the totals, `run_sql` for the database totals, and the answer names INV-2026-0003 as 100.00 EUR off. Write down exactly what happens, success or not.
   2. A long session that forces trimming: read the contract, both pages, then the Excel sheet page by page, then ask about something from the start. Expected: `[context] shortened ...` lines, the context number stays under 8192, and note what the model still remembers.

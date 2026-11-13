@@ -35,6 +35,7 @@ class Agent:
         self.context_window = context_window
         self.on_trim = on_trim  # called with the number of messages changed, so the CLI can say so
         self.context_tokens = 0  # the estimate for the most recent model call
+        self.over_budget = False  # True when even the newest turn alone did not fit
         self.messages: list[Message] = []
         self.reset()
 
@@ -82,5 +83,6 @@ class Agent:
             turn, changes = fit_to_budget(turn, budget)
             if changes and self.on_trim:
                 self.on_trim(changes)
+            self.over_budget = estimate_tokens(turn) > budget
         self.context_tokens = estimate_tokens(turn, schemas)
         return turn

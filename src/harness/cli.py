@@ -22,6 +22,8 @@ def run_repl(
     read: Callable[[str], str] = input,
     write: Callable[[str], None] = print,
 ) -> None:
+    agent.on_trim = lambda n: write(f"  [context] trimmed {n} old message(s) to fit")
+
     while True:
         try:
             text = read("you> ").strip()
@@ -53,7 +55,11 @@ def run_repl(
 
         write(f"agent> {answer or '(no reply)'}")
         if agent.context_window:
-            write(f"  [context ~{agent.context_tokens} of {agent.context_window} tokens]")
+            line = f"  [context ~{agent.context_tokens} of {agent.context_window} tokens]"
+            if agent.over_budget:
+                # Nothing more could be cut. Ollama will drop the oldest text itself, silently.
+                line += " (over budget: the model may have lost the start of the conversation)"
+            write(line)
 
 
 def show_tool_call(name: str, arguments: str, result: str) -> None:
@@ -95,8 +101,7 @@ def main() -> None:
         tools=[*BUILTIN_TOOLS, *make_file_tools(settings.data_dir), *sql_tools],
         max_steps=settings.max_steps,
         on_tool_call=show_tool_call,
-        context_window=settings.context_window,
-        on_trim=lambda n: print(f"  [context] shortened {n} old message(s) to fit"),
+        context_window=settings.context_window,  # run_repl adds the on_trim notice
     )
     try:
         run_repl(agent)

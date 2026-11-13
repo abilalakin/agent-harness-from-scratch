@@ -1,9 +1,10 @@
 import httpx2
 import openai
 
-from fakes import FakeModel
+from fakes import BIG, FakeModel, tool_reply
 from harness.agent import Agent
 from harness.cli import run_repl
+from harness.context import REPLY_RESERVE
 
 
 def run(agent: Agent, inputs: list) -> list[str]:
@@ -69,3 +70,15 @@ def test_repl_shows_context_size_when_the_agent_has_a_window():
 def test_repl_hides_context_size_without_a_window():
     out = run(Agent(FakeModel([reply("x")])), ["hi", "/exit"])
     assert not any("[context" in line for line in out)
+
+
+def test_repl_reports_trimming_through_write():
+    model = FakeModel([tool_reply("big", "{}", f"c{i}") for i in range(3)] + [reply("done")])
+    agent = Agent(model, tools=[BIG], context_window=REPLY_RESERVE + 1800)
+    out = run(agent, ["go", "/exit"])
+    assert any("[context] trimmed" in line for line in out)
+
+
+def test_repl_warns_when_the_newest_turn_alone_is_over_budget():
+    out = run(Agent(FakeModel([reply("x")]), context_window=3000), ["q" * 20000, "/exit"])
+    assert any("over budget" in line for line in out)

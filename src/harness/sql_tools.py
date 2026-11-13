@@ -12,10 +12,11 @@ from contextlib import closing
 from functools import partial
 from pathlib import Path
 
-from harness.file_tools import MISSING_DATA_HINT
+from harness.file_tools import MISSING_DATA_HINT, row_text
 from harness.tools import Tool
 
 MAX_ROWS = 50
+MAX_COUNT = 10_000  # stop counting the rows we won't show here; the note then says "more than"
 QUERY_TIME_LIMIT_SECONDS = 10
 
 # Written for the model. Shared by the built-in tools below and the MCP server (mcp_server.py).
@@ -62,17 +63,22 @@ def run_sql(db_path: Path, query: str) -> str:
             return "(no rows)"
         header = " | ".join(column[0] for column in cursor.description)
         rows = cursor.fetchmany(MAX_ROWS)
-        # Count the rows we won't show, so the note can give the real total.
-        # (Counting is cheap; the time limit still stops a query that never ends.)
-        total = len(rows) + sum(1 for _ in cursor)
+        # Count the rows we won't show, so the note can give the real total. Up to a point:
+        # an accidental cross join has millions, and counting them all would hit the time limit.
+        total = len(rows)
+        for _ in cursor:
+            total += 1
+            if total > MAX_COUNT:
+                break
 
     if not rows:
         return "(no rows)"
-    lines = [header] + [" | ".join("" if v is None else str(v) for v in row) for row in rows]
+    lines = [header] + [row_text(row) for row in rows]
     if total > len(rows):
         # The note goes first, with the real total. In step 3 the model read a note at the end,
         # "only the first 50", as "there are 50 invoices". There were 112.
-        note = f"[showing rows 1-{len(rows)} of {total}. Use WHERE, GROUP BY, or LIMIT/OFFSET for other rows.]"
+        of = f"more than {MAX_COUNT}" if total > MAX_COUNT else str(total)
+        note = f"[showing rows 1-{len(rows)} of {of}. Use WHERE, GROUP BY, or LIMIT/OFFSET for other rows.]"
         lines.insert(0, note)
     return "\n".join(lines)
 

@@ -11,11 +11,11 @@ from pathlib import Path
 import openpyxl
 from pypdf import PdfReader
 
-from harness.tools import Tool
+from harness.tools import MAX_TOOL_OUTPUT, Tool
 
 MISSING_DATA_HINT = "No practice data yet. Run: uv run make-data"
 TEXT_SUFFIXES = {".txt", ".md", ".csv", ".json"}
-EXCEL_PAGE_ROWS = 30  # rows per read_excel call; 30 rows of this sheet are about 2000 characters
+EXCEL_PAGE_ROWS = 30  # rows per read_excel call, at most
 MAX_MATCHES = 30  # search results per call
 
 
@@ -96,39 +96,60 @@ def read_excel(
     file = _existing_file(data_dir, path)
     if file.suffix.lower() != ".xlsx":
         raise _wrong_type(path, "an .xlsx file")
-    book = openpyxl.load_workbook(file, data_only=True)
-    if sheet is not None and sheet not in book.sheetnames:
-        raise ValueError(f"no sheet '{sheet}'. Sheets: {', '.join(book.sheetnames)}")
-    ws = book[sheet] if sheet else book.active
-    total = ws.max_row
+    # read_only: only the rows we ask for are read, instead of every cell in the file.
+    book = openpyxl.load_workbook(file, read_only=True, data_only=True)
+    try:
+        if sheet is not None and sheet not in book.sheetnames:
+            raise ValueError(f"no sheet '{sheet}'. Sheets: {', '.join(book.sheetnames)}")
+        ws = book[sheet] if sheet else book.active
+        total = ws.max_row
+        if total is None:  # a file written without a size hint: count the rows
+            total = sum(1 for _ in ws.iter_rows())
 
-    start_row, max_rows = int(start_row), int(max_rows)  # models send "41" as often as 41
-    if not 1 <= start_row <= total:
-        raise ValueError(f"start_row {start_row} is out of range. This sheet has rows between 1 and {total}.")
-    if max_rows < 1:
-        raise ValueError("max_rows must be at least 1")
-    # The page size is a ceiling, not a default. A model once asked for max_rows=1000; the whole
-    # sheet came back, cap_output cut it, and the paging note still said "end of sheet".
-    max_rows = min(max_rows, EXCEL_PAGE_ROWS)
-    end_row = min(start_row + max_rows - 1, total)
+        start_row, max_rows = int(start_row), int(max_rows)  # models send "41" as often as 41
+        if not 1 <= start_row <= total:
+            raise ValueError(f"start_row {start_row} is out of range. This sheet has rows between 1 and {total}.")
+        if max_rows < 1:
+            raise ValueError("max_rows must be at least 1")
+        # EXCEL_PAGE_ROWS is a ceiling, whatever the model asks for. The character budget below is
+        # what really keeps a page under the output cap; the ceiling keeps pages a readable size.
+        last_wanted = min(start_row + min(max_rows, EXCEL_PAGE_ROWS) - 1, total)
 
-    def row_line(n: int) -> str:
-        # Row numbers match what you see in Excel, so the model can say "row 12".
-        cells = []
-        for cell in ws[n]:
-            cells.append("" if cell.value is None else str(cell.value))
-        return f"{n}: " + " | ".join(cells)
+        def row_lines(first: int, last: int):
+            # Row numbers match what you see in Excel, so the model can say "row 12".
+            for n, values in enumerate(ws.iter_rows(min_row=first, max_row=last, values_only=True), first):
+                yield f"{n}: " + row_text(values)
 
+        lines = [f"Sheets: {', '.join(book.sheetnames)}"]
+        if start_row > 1:
+            lines += row_lines(1, 1)  # the header row, so every page shows the column names
+
+        # A page is limited by rows AND by characters, so cap_output never has to cut one.
+        # Count what is already in the page, plus room for the note (its longest form).
+        size = sum(len(line) + 1 for line in lines)
+        size += len(f"[rows {start_row}-{total} of {total}. Next page: start_row={total + 1}]") + 1
+        rows_out = []
+        for line in row_lines(start_row, last_wanted):
+            if rows_out and size + len(line) + 1 > MAX_TOOL_OUTPUT:
+                break
+            rows_out.append(line)
+            size += len(line) + 1
+    finally:
+        book.close()
+
+    # The note is written after, from the rows that really made it, so it is always true.
+    end_row = start_row + len(rows_out) - 1
     if end_row < total:
         note = f"[rows {start_row}-{end_row} of {total}. Next page: start_row={end_row + 1}]"
     else:
         note = f"[rows {start_row}-{end_row} of {total}, end of sheet]"
-    lines = [f"Sheets: {', '.join(book.sheetnames)}", note]
-    if start_row > 1:
-        lines.append(row_line(1))  # the header row, so every page shows the column names
-    for n in range(start_row, end_row + 1):
-        lines.append(row_line(n))
-    return "\n".join(lines)
+    lines.insert(1, note)
+    return "\n".join(lines + rows_out)
+
+
+def row_text(values) -> str:
+    """One row as 'a | b | c'. Empty cells become empty strings. Shared with the SQL tool."""
+    return " | ".join("" if v is None else str(v) for v in values)
 
 
 # --- Search ---------------------------------------------------------------
@@ -152,11 +173,15 @@ def _pdf_lines(file: Path):
 def _excel_rows(file: Path):
     book = openpyxl.load_workbook(file, read_only=True, data_only=True)
     for sheet in book.worksheets:
+        # With several sheets, "row 12" alone would send read_excel to the wrong one.
+        where = f"sheet {sheet.title} row" if len(book.worksheets) > 1 else "row"
         for n, row in enumerate(sheet.iter_rows(values_only=True), 1):
-            yield f"row {n}", " | ".join("" if cell is None else str(cell) for cell in row)
+            yield f"{where} {n}", row_text(row)
 
 
-_SEARCHERS = {**{suffix: _text_lines for suffix in TEXT_SUFFIXES}, ".pdf": _pdf_lines, ".xlsx": _excel_rows}
+_SEARCHERS = {".pdf": _pdf_lines, ".xlsx": _excel_rows}
+for suffix in TEXT_SUFFIXES:
+    _SEARCHERS[suffix] = _text_lines
 
 
 def search_files(data_dir: Path, query: str, path: str = ".") -> str:
@@ -170,21 +195,22 @@ def search_files(data_dir: Path, query: str, path: str = ".") -> str:
     root = data_dir.resolve()
     needle = query.lower()
 
-    matches = []
+    matches, total = [], 0  # keep the first MAX_MATCHES, count the rest
     for file in _files_below(data_dir, path):
         searcher = _SEARCHERS.get(file.suffix.lower())
         if searcher is None:
             continue
         for location, text in searcher(file):
             if needle in text.lower():
-                matches.append(f"{file.relative_to(root)} {location}: {text.strip()}")
+                total += 1
+                if len(matches) < MAX_MATCHES:
+                    matches.append(f"{file.relative_to(root)} {location}: {text.strip()}")
 
     if not matches:
         return f"(no matches for '{query}')"
-    lines = matches[:MAX_MATCHES]
-    if len(matches) > MAX_MATCHES:
-        lines.insert(0, f"[showing {MAX_MATCHES} of {len(matches)} matches. Use a more specific query or a path.]")
-    return "\n".join(lines)
+    if total > MAX_MATCHES:
+        matches.insert(0, f"[showing {MAX_MATCHES} of {total} matches. Use a more specific query or a path.]")
+    return "\n".join(matches)
 
 
 def make_file_tools(data_dir: Path) -> list[Tool]:

@@ -4,7 +4,7 @@ import pytest
 
 from harness import sql_tools
 from harness.practice_data import make_all
-from harness.sql_tools import MAX_ROWS, describe_tables, make_sql_tools, run_sql
+from harness.sql_tools import MAX_COUNT, MAX_ROWS, describe_tables, make_sql_tools, run_sql
 from harness.tools import run_tool_call
 
 
@@ -95,3 +95,10 @@ def test_runaway_query_is_stopped(db_path, monkeypatch):
     endless = "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c) SELECT COUNT(*) FROM c"
     with pytest.raises(sqlite3.OperationalError, match="interrupted"):
         run_sql(db_path, endless)
+
+
+def test_huge_result_stops_counting_at_max_count(db_path):
+    # orders x order_lines is about 100,000 rows. Counting them all would risk the time limit.
+    lines = run_sql(db_path, "SELECT o.id FROM orders o, order_lines l").splitlines()
+    assert lines[0].startswith(f"[showing rows 1-50 of more than {MAX_COUNT}.")
+    assert len(lines) == 2 + MAX_ROWS

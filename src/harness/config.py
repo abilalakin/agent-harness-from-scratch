@@ -24,6 +24,14 @@ class Settings:
     context_window: int = 8192
 
 
+def _count(env: Mapping[str, str], name: str, default: int) -> int:
+    """An env var that must be a whole number of 1 or more."""
+    value = env.get(name, str(default))
+    if not value.isdigit() or int(value) < 1:
+        raise ValueError(f"{name} must be a whole number of 1 or more, not {value!r}")
+    return int(value)
+
+
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     """Build Settings from HARNESS_* variables. Missing ones keep their default."""
     env = os.environ if env is None else env
@@ -35,8 +43,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         base_url=env.get("HARNESS_BASE_URL", default.base_url),
         model=env.get("HARNESS_MODEL", default.model),
         api_key=env.get("HARNESS_API_KEY", default.api_key),
-        max_steps=int(env.get("HARNESS_MAX_STEPS", default.max_steps)),
+        max_steps=_count(env, "HARNESS_MAX_STEPS", default.max_steps),
         data_dir=Path(env.get("HARNESS_DATA_DIR", default.data_dir)),
         sql_via=sql_via,
-        context_window=int(env.get("HARNESS_CONTEXT_WINDOW", default.context_window)),
+        context_window=_count(env, "HARNESS_CONTEXT_WINDOW", default.context_window),
     )

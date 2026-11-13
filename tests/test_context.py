@@ -1,6 +1,7 @@
 import copy
 import json
 
+from fakes import tool_reply
 from harness.context import estimate_tokens, fit_to_budget
 
 SYSTEM = {"role": "system", "content": "You are a helpful assistant."}
@@ -8,10 +9,9 @@ SYSTEM = {"role": "system", "content": "You are a helpful assistant."}
 
 def tool_turn(i, size):
     """One question that needed one tool call whose result is `size` characters long."""
-    call = {"id": f"c{i}", "type": "function", "function": {"name": "read_pdf", "arguments": json.dumps({"path": f"f{i}.pdf"})}}
     return [
         {"role": "user", "content": f"read file {i}"},
-        {"role": "assistant", "content": None, "tool_calls": [call]},
+        tool_reply("read_pdf", json.dumps({"path": f"f{i}.pdf"}), id=f"c{i}"),
         {"role": "tool", "tool_call_id": f"c{i}", "content": "x" * size},
         {"role": "assistant", "content": f"done {i}"},
     ]
@@ -65,3 +65,14 @@ def test_input_list_is_not_changed():
     before = copy.deepcopy(msgs)
     fit_to_budget(msgs, 1500)
     assert msgs == before
+
+
+def test_estimate_does_not_inflate_non_ascii_text():
+    turkish = "ğüşıöç" * 100  # 600 characters
+    assert estimate_tokens([{"role": "user", "content": turkish}]) < 200
+
+
+def test_changes_counts_every_message_that_was_stubbed_or_dropped():
+    msgs = [SYSTEM] + [m for i in range(1, 30) for m in plain_turn(i, 400)]
+    out, changes = fit_to_budget(msgs, 1000)
+    assert changes == len(msgs) - len(out)

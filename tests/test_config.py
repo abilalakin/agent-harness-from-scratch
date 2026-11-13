@@ -38,3 +38,12 @@ def test_sql_via_default_override_and_bad_value():
 def test_context_window_default_and_override():
     assert load_settings({}).context_window == 8192
     assert load_settings({"HARNESS_CONTEXT_WINDOW": "4096"}).context_window == 4096
+
+
+@pytest.mark.parametrize(
+    "name, value",
+    [("HARNESS_MAX_STEPS", "0"), ("HARNESS_MAX_STEPS", "ten"), ("HARNESS_CONTEXT_WINDOW", "-5")],
+)
+def test_counts_must_be_whole_numbers_of_at_least_one(name, value):
+    with pytest.raises(ValueError, match="whole number of 1 or more"):
+        load_settings({name: value})
