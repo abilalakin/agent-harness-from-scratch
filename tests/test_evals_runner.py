@@ -101,3 +101,24 @@ def test_main_saves_each_run_before_the_next_starts(tmp_path, monkeypatch):
     monkeypatch.setattr("harness.evals.cli.build_agent", fake)
     main(["--runs", "2", "--task", "invoice-count", "--label", "test"])
     assert lines_when_second_run_started == [1, 2]  # meta line only, then meta + run 1
+
+
+def test_main_judge_flag_lets_the_judge_override_the_checker(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    agent = lambda settings, system_prompt: Agent(FakeModel([{"role": "assistant", "content": "Germany"}]), max_steps=2)
+    judge = lambda settings: FakeModel([{"role": "assistant", "content": '{"pass": false, "reason": "no penalty"}'}])
+    monkeypatch.setattr("harness.evals.cli.build_agent", agent)
+    monkeypatch.setattr("harness.evals.cli.OpenAIChatModel", judge)
+    main(["--runs", "1", "--task", "contract-summary", "--judge", "--label", "test"])
+    report = next((tmp_path / "docs" / "evals").glob("*-test.md")).read_text()
+    assert "| contract-summary | 0 of 1 |" in report and "no penalty" in report and "- judge: yes" in report
+
+
+def test_main_check_judge_runs_no_tasks(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("harness.evals.cli.build_agent", lambda *a: pytest.fail("a task was run"))
+    judge = lambda settings: FakeModel([{"role": "assistant", "content": '{"pass": true, "reason": "ok"}'}] * 6)
+    monkeypatch.setattr("harness.evals.cli.OpenAIChatModel", judge)
+    main(["--check-judge"])
+    out = capsys.readouterr().out
+    assert "| hand grade | judge |" in out and "disagree" in out and not (tmp_path / "docs").exists()

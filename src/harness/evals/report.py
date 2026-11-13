@@ -54,7 +54,8 @@ def write_report(results: list[RunResult], tasks: list[Task], meta: dict[str, st
         failed = next((r for r in results if r.task_id == task.id and not r.passed), None)
         if failed:
             shown = failed.error or failed.answer or "(no answer)"
-            failures.append(f"**{task.id}** (run {failed.run}):\n> {shown[:QUOTE_CHARS]}\n")
+            judge = f"\n> judge: {failed.judge_reason}" if failed.judge_reason else ""
+            failures.append(f"**{task.id}** (run {failed.run}):\n> {shown[:QUOTE_CHARS]}{judge}\n")
     if failures:
         lines += ["", "## Failures", ""] + failures
     return "\n".join(lines) + "\n"

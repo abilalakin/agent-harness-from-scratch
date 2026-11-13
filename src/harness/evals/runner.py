@@ -30,6 +30,7 @@ class RunResult:
     model_calls: int
     seconds: float
     error: str | None  # the exception, or None
+    judge_reason: str | None = None  # set when a model judge graded this run (6c)
 
 
 class TokenCounter:

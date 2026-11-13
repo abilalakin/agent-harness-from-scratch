@@ -9,6 +9,7 @@ from pathlib import Path
 
 from harness.agent import SYSTEM_PROMPT, Agent
 from harness.config import Settings, load_settings
+from harness.evals.judge import check_judge, judge_results
 from harness.evals.report import to_json, write_report
 from harness.evals.runner import RunResult, run_all
 from harness.evals.tasks import TASKS, task_by_id
@@ -53,14 +54,21 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--label", help="name for this run (default: the model name)")
     parser.add_argument("--task", action="append", help="only this task id; repeat for several")
     parser.add_argument("--system-prompt", type=Path, help="a file with a system prompt to use instead of the default")
+    parser.add_argument("--judge", action="store_true", help="let a model judge grade the tasks that have a rubric")
+    parser.add_argument("--check-judge", action="store_true", help="grade the hand-graded answers and stop")
     args = parser.parse_args(argv)
+
+    settings = load_settings()
+    if args.check_judge:
+        disagreements = check_judge(OpenAIChatModel(settings))
+        print(f"\nThe judge disagreed with the hand grade {disagreements} time(s).")
+        return
 
     try:
         tasks = [task_by_id(id) for id in args.task] if args.task else TASKS
     except KeyError as e:
         parser.error(str(e))
 
-    settings = load_settings()
     system_prompt = args.system_prompt.read_text() if args.system_prompt else SYSTEM_PROMPT
     label = args.label or settings.model.replace(":", "-")
     meta = {
@@ -70,6 +78,7 @@ def main(argv: list[str] | None = None) -> None:
         "prompt": args.system_prompt.stem if args.system_prompt else "default",
         "context_window": str(settings.context_window),
         "runs": str(args.runs),
+        "judge": "yes" if args.judge else "no",
         "commit": _git_commit() or "unknown",
     }
 
@@ -83,6 +92,8 @@ def main(argv: list[str] | None = None) -> None:
         on_result=raw.add,
     )
     raw.file.close()
+    if args.judge:
+        judge_results(OpenAIChatModel(settings), results, tasks)
 
     report_path = Path("docs/evals") / f"{stem}.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)

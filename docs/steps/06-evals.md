@@ -64,3 +64,29 @@ The report gets a `trajectory` column next to `passed`, and a section **Right an
 ### Why both checks, not one
 
 A trajectory check alone would reward a model that reads all five PDFs and then answers wrong. An answer check alone rewards the guess. A run is good when both pass, and the two failure kinds mean different things: a wrong answer is a reasoning or reading problem, a skipped trajectory is the model not doing what it said. They get different fixes (a stricter prompt, a different tool, a bigger model), so they are counted apart.
+
+## 6c: A model as judge
+
+### Why
+
+"Summarize the supply agreement in three bullet points" has no single right string. `contains("Germany")` passes a summary that gets the payment terms wrong and fails a perfect one that says "the laws of Germany apply" in different words. For free text, the checker has to read.
+
+So a second model call does. `judge_answer` (`src/harness/evals/judge.py`) sends the question, the answer and a rubric, and asks for JSON only: `{"pass": true or false, "reason": "..."}`. The rubric for the summary task names three facts that must be there (net 30, 1.5% per month, German law), a length limit, and "no clause that is not in the agreement". `uv run evals --judge` lets the judge's verdict replace the checker's on every task that has a rubric.
+
+Two small things in the code that matter in practice:
+
+- The judge gets **no tools**. It grades the text it is given. If it could look things up, you would be measuring the judge's research, not the answer.
+- Qwen writes prose around its JSON, or forgets the JSON. The first `{...}` in the reply is parsed; no JSON means fail with the reason "judge gave no JSON", never a crash.
+
+### Checking the judge
+
+A judge is a model, with a model's biases. The known ones: long answers look thorough, confident answers look right, an answer in its own style looks good. So before the judge is trusted, it grades six answers that were graded by hand first (`JUDGE_CHECKS`). Each one tests one bias:
+
+1. The plain correct answer (pass).
+2. The same answer padded with filler (pass: length should not matter).
+3. Three bullets with the penalty missing (fail).
+4. The correct answer plus a confident, made-up clause about an early-payment discount (fail).
+5. One terse line with all three facts (pass).
+6. The correct answer plus "I checked every page carefully" (pass: self-praise is not a rubric point).
+
+`uv run evals --check-judge` prints a table of hand grade against judge grade. Where they disagree is where the judge cannot be trusted, and that is a fact about the judge that you want to know before it grades a hundred runs.

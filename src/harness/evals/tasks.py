@@ -88,6 +88,7 @@ class Task:
     question: str
     check: Check
     trajectory: TrajectoryCheck | None = None
+    rubric: str | None = None  # when set, a model judge grades the answer instead of `check` (6c)
 
 
 TASKS = [
@@ -159,6 +160,10 @@ TASKS = [
         "Summarize the supply agreement in three short bullet points.",
         contains("Germany"),
         called("read_pdf", "supply-agreement"),
+        rubric=(
+            "Mentions all three: net 30 day payment terms, the 1.5% per month late penalty, and German law. "
+            "Three bullet points or fewer. No clause that is not in the agreement."
+        ),
     ),
 ]
 
