@@ -22,7 +22,7 @@ class ChatModel(Protocol):
         ...
 
 
-_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
+_THINK_BLOCK = re.compile(r"<think>(.*?)</think>", re.DOTALL)
 
 
 def split_thinking(text: str | None) -> tuple[str, str | None]:
@@ -33,7 +33,7 @@ def split_thinking(text: str | None) -> tuple[str, str | None]:
     """
     if text is None:
         return "", None
-    thinking = " ".join(m.strip() for m in re.findall(r"<think>(.*?)</think>", text, re.DOTALL))
+    thinking = " ".join(m.strip() for m in _THINK_BLOCK.findall(text))
     text = _THINK_BLOCK.sub("", text)
     # A reply cut off mid-thought has an opening tag and no closing one.
     if "<think>" in text:
@@ -63,7 +63,8 @@ class OpenAIChatModel:
         reply = self.client.chat.completions.create(**kwargs).choices[0].message
 
         inline, content = split_thinking(reply.content)
-        thinking = getattr(reply, "reasoning", None) or inline  # Ollama's own field first, inline tags as a fallback
+        # Ollama's own field first, inline tags as a fallback. Stripped here, so no hook has to check for blank text.
+        thinking = (getattr(reply, "reasoning", None) or inline).strip()
         if thinking and self.on_thinking:
             self.on_thinking(thinking)
 

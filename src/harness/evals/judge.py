@@ -23,7 +23,7 @@ JUDGE_PROMPT = (
     '{"pass": true or false, "reason": "one sentence"}. Pass only if every rubric point is met.'
 )
 
-_JSON_BLOCK = re.compile(r"\{.*?\}", re.DOTALL)
+_JSON_BLOCKS = re.compile(r"\{[^{}]*\}")  # every brace pair without nesting; the verdict is one of them
 
 
 @dataclass(frozen=True)
@@ -33,26 +33,31 @@ class Verdict:
 
 
 def judge_answer(model: ChatModel, question: str, answer: str, rubric: str) -> Verdict:
-    """One model call, no tools. The first {...} in the reply is the verdict; no JSON means fail."""
+    """One model call, no tools. The first {...} that parses and has a "pass" key is the verdict; none means fail."""
     content = f"Question:\n{question}\n\nRubric:\n{rubric}\n\nAnswer to grade:\n{answer}"
     reply = model.complete([{"role": "system", "content": JUDGE_PROMPT}, {"role": "user", "content": content}])
-    match = _JSON_BLOCK.search(reply.get("content") or "")
+    for block in _JSON_BLOCKS.findall(reply.get("content") or ""):
+        try:
+            verdict = json.loads(block)
+        except ValueError:
+            continue  # prose in braces, not the verdict
+        if isinstance(verdict, dict) and "pass" in verdict:
+            # Compared as text: bool("false") would be True, and models do quote their booleans.
+            return Verdict(str(verdict["pass"]).lower() == "true", str(verdict.get("reason", "")))
+    return Verdict(False, "judge gave no JSON")
+
+
+def judge_result(model: ChatModel, result: RunResult, task: Task) -> None:
+    """If the task has a rubric, the judge's verdict replaces the checker's. Called right after each run."""
+    if not task.rubric or result.error is not None:
+        return
     try:
-        verdict = json.loads(match.group()) if match else {}
-        return Verdict(bool(verdict["pass"]), str(verdict.get("reason", "")))
-    except (ValueError, KeyError):
-        return Verdict(False, "judge gave no JSON")
-
-
-def judge_results(model: ChatModel, results: list[RunResult], tasks: list[Task]) -> None:
-    """For every result whose task has a rubric, the judge's verdict replaces the checker's."""
-    judged = {task.id: task for task in tasks if task.rubric}
-    for result in results:
-        task = judged.get(result.task_id)
-        if task and result.error is None:
-            verdict = judge_answer(model, task.question, result.answer, task.rubric or "")
-            result.passed = verdict.passed
-            result.judge_reason = verdict.reason
+        verdict = judge_answer(model, task.question, result.answer, task.rubric)
+    except Exception as e:  # one lost verdict, not a lost run
+        result.passed, result.error = False, f"judge: {type(e).__name__}: {e}"
+        return
+    result.passed = verdict.passed
+    result.judge_reason = verdict.reason
 
 
 # --- Checking the judge ------------------------------------------------------
@@ -82,7 +87,8 @@ def check_judge(model: ChatModel, log: Callable[[str], None] = print) -> int:
     disagreements = 0
     for n, (answer, expected, why) in enumerate(JUDGE_CHECKS, 1):
         verdict = judge_answer(model, task.question, answer, task.rubric or "")
-        disagreements += verdict.passed != expected
-        mark = "" if verdict.passed == expected else " (disagrees)"
+        agrees = verdict.passed == expected
+        disagreements += not agrees
+        mark = "" if agrees else " (disagrees)"
         log(f"| {n} | {'pass' if expected else 'fail'}: {why} | {'pass' if verdict.passed else 'fail'}{mark} | {verdict.reason} |")
     return disagreements

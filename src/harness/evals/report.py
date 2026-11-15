@@ -24,6 +24,16 @@ def _mean(values: list[float]) -> str:
     return f"{mean(values):.0f}" if values else "-"
 
 
+def _passed(results: list[RunResult]) -> str:
+    return f"{sum(r.passed for r in results)} of {len(results)}"
+
+
+def _trajectory(results: list[RunResult]) -> str:
+    """'3 of 5' over the runs that had a trajectory check, or '-' when none had one."""
+    checked = [r for r in results if r.trajectory_ok is not None]
+    return f"{sum(r.trajectory_ok for r in checked)} of {len(checked)}" if checked else "-"
+
+
 def write_report(results: list[RunResult], tasks: list[Task], meta: dict[str, str]) -> str:
     lines = [f"# Evals: {meta.get('label', 'run')}", ""]
     lines += [f"- {key}: {value}" for key, value in meta.items()]
@@ -31,21 +41,18 @@ def write_report(results: list[RunResult], tasks: list[Task], meta: dict[str, st
 
     for task in tasks:
         runs = [r for r in results if r.task_id == task.id]
-        passed = f"{sum(r.passed for r in runs)} of {len(runs)}"
+        passed = _passed(runs)
         if errors := sum(r.error is not None for r in runs):
             passed += f" ({errors} error{'s' if errors > 1 else ''})"  # a crash is not a wrong answer
-        checked = [r for r in runs if r.trajectory_ok is not None]
-        trajectory = f"{sum(r.trajectory_ok for r in checked)} of {len(checked)}" if checked else "-"
         lines.append(
-            f"| {task.id} | {passed} | {trajectory} | {_mean([len(r.calls) for r in runs])} "
+            f"| {task.id} | {passed} | {_trajectory(runs)} | {_mean([len(r.calls) for r in runs])} "
             f"| {_mean([r.tokens for r in runs])} | {_mean([r.seconds for r in runs])} |"
         )
-    total = f"**Total: {sum(r.passed for r in results)} of {len(results)} runs passed"
+    total = f"**Total: {_passed(results)} runs passed"
     if errors := sum(r.error is not None for r in results):
         total += f", {errors} errored"
-    checked = [r for r in results if r.trajectory_ok is not None]
-    if checked:
-        total += f", trajectory ok in {sum(r.trajectory_ok for r in checked)} of {len(checked)}"
+    if _trajectory(results) != "-":
+        total += f", trajectory ok in {_trajectory(results)}"
     lines += ["", total + "**"]
 
     # The interesting failures: the answer was right, but the work was skipped.
@@ -59,9 +66,11 @@ def write_report(results: list[RunResult], tasks: list[Task], meta: dict[str, st
     for task in tasks:
         failed = next((r for r in results if r.task_id == task.id and not r.passed), None)
         if failed:
-            shown = failed.error or failed.answer or "(no answer)"
-            judge = f"\n> judge: {failed.judge_reason}" if failed.judge_reason else ""
-            failures.append(f"**{task.id}** (run {failed.run}):\n> {shown[:QUOTE_CHARS]}{judge}\n")
+            shown = (failed.error or failed.answer or "(no answer)")[:QUOTE_CHARS]
+            if failed.judge_reason:
+                shown += f"\njudge: {failed.judge_reason}"
+            quoted = "\n".join(f"> {line}" for line in shown.splitlines())  # every line, or a list breaks out
+            failures.append(f"**{task.id}** (run {failed.run}):\n{quoted}\n")
     if failures:
         lines += ["", "## Failures", ""] + failures
     return "\n".join(lines) + "\n"
@@ -81,12 +90,10 @@ def compare(raw_paths: list[Path]) -> str:
     ]
     for path in raw_paths:
         meta, results = read_raw(path)
-        checked = [r for r in results if r.trajectory_ok is not None]
-        trajectory = f"{sum(r.trajectory_ok for r in checked)} of {len(checked)}" if checked else "-"
         lines.append(
             f"| {meta.get('label', path.stem)} | {meta.get('model', '?')} | {meta.get('prompt', '?')} "
             f"| {meta.get('context_window', '?')} | {meta.get('commit', '?')} "
-            f"| {sum(r.passed for r in results)} of {len(results)} | {trajectory} "
+            f"| {_passed(results)} | {_trajectory(results)} "
             f"| {_mean([len(r.calls) for r in results])} | {_mean([r.tokens for r in results])} "
             f"| {_mean([r.seconds for r in results])} |"
         )

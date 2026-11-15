@@ -11,13 +11,13 @@ An eval turns "it seemed to work" into a number. Step 6 builds one for this harn
 Three things: a question, a known answer, and a checker that compares the two. Here:
 
 ```python
-Task("invoice-count", "How many invoices are in the ERP database?", contains("112"))
+Task("invoice-count", "How many invoices are in the ERP database?", number(112))
 ```
 
 The checker is a small function from answer text to pass/fail. Three kinds are enough for now:
 
-- `contains("112")`: the text appears, any case.
-- `number_near(13701.44)`: some number in the answer is within 1.0 of the expected one. It strips thousands separators, so `13,701.44 EUR` passes too.
+- `contains("Meridian Trading")`: the text appears, any case. For names, not for numbers: `contains("33")` would also pass "133 invoices", which the review pass caught.
+- `number(13701.44, tolerance=1)`: some number in the answer is within 1.0 of the expected one. It strips thousands separators, so `13,701.44 EUR` passes too. `number(112)` with no tolerance is an exact count.
 - `all_of(...)`: every check passes.
 
 Twelve tasks over the practice data (`src/harness/evals/tasks.py`). They were picked to cover what the earlier steps got wrong: counting in a cut result (step 3), the invoice check (step 5), the search that found nothing because the wording differed (step 5), and Excel paging. The expected values come from the seed-42 practice data, and one test regenerates the data and checks every value against it. If the generator changes, that test fails before the evals do.

@@ -80,7 +80,8 @@ def test_inline_think_block_also_goes_to_on_thinking():
 
 
 def test_no_thinking_means_no_call():
-    stub = StubClient({"role": "assistant", "content": "Hi"})
     seen = []
-    OpenAIChatModel(Settings(), client=stub, on_thinking=seen.append).complete([{"role": "user", "content": "?"}])
-    assert seen == []
+    for message in ({"role": "assistant", "content": "Hi"}, {"role": "assistant", "content": "Hi", "reasoning": "\n  "}):
+        stub = StubClient(message)
+        OpenAIChatModel(Settings(), client=stub, on_thinking=seen.append).complete([{"role": "user", "content": "?"}])
+    assert seen == []  # none, and whitespace only, are both nothing to show

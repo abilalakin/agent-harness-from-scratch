@@ -1,10 +1,10 @@
 import pytest
-from fakes import FakeModel, tool_reply
+from fakes import BIG, FakeModel, tool_reply
 from harness.agent import Agent
 from harness.evals.cli import main
 from harness.evals.runner import TokenCounter, run_all, run_task
 from harness.evals.tasks import Task, contains
-from harness.tools import BUILTIN_TOOLS, Tool
+from harness.tools import BUILTIN_TOOLS
 
 TASK = Task(id="t", question="what is 2+2?", check=contains("4"))
 
@@ -42,8 +42,7 @@ def test_ctrl_c_is_not_swallowed():
 
 
 def test_stored_tool_results_are_cut_to_500_characters():
-    big = Tool("big", "", {"type": "object", "properties": {}}, lambda: "z" * 4000)
-    agent = lambda: Agent(FakeModel([tool_reply("big", "{}"), {"role": "assistant", "content": "4"}]), tools=[big])
+    agent = lambda: Agent(FakeModel([tool_reply("big", "{}"), {"role": "assistant", "content": "4"}]), tools=[BIG])
     assert len(run_task(TASK, agent).calls[0].result) == 500
 
 
@@ -85,8 +84,8 @@ def test_main_writes_raw_log_and_report(tmp_path, monkeypatch):
 
 def test_run_all_hands_each_result_over_as_soon_as_it_is_done():
     seen = []
-    run_all([TASK], make_agent([{"role": "assistant", "content": "4"}]), runs=2, log=lambda s: None, on_result=seen.append)
-    assert [r.run for r in seen] == [1, 2]
+    run_all([TASK], make_agent([{"role": "assistant", "content": "4"}]), runs=2, log=lambda s: None, on_result=lambda r, t: seen.append((r.run, t.id)))
+    assert seen == [(1, "t"), (2, "t")]
 
 
 def test_main_saves_each_run_before_the_next_starts(tmp_path, monkeypatch):
@@ -124,3 +123,25 @@ def test_main_check_judge_runs_no_tasks(tmp_path, monkeypatch, capsys):
     main(["--check-judge"])
     out = capsys.readouterr().out
     assert "| hand grade | judge |" in out and "disagree" in out and not (tmp_path / "docs").exists()
+
+
+def test_progress_line_says_error_not_fail_for_a_crashed_run():
+    lines = []
+    run_all([TASK], make_agent([RuntimeError("boom")]), runs=1, log=lines.append)
+    assert lines == ["t run 1: ERROR RuntimeError: boom (0s, 0 tool calls)"]
+
+
+def test_main_refuses_to_overwrite_an_existing_run(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    fake = lambda settings, system_prompt: Agent(FakeModel([{"role": "assistant", "content": "112"}]), max_steps=2)
+    monkeypatch.setattr("harness.evals.cli.build_agent", fake)
+    main(["--runs", "1", "--task", "invoice-count", "--label", "test"])
+    with pytest.raises(SystemExit) as e:
+        main(["--runs", "1", "--task", "invoice-count", "--label", "test"])
+    assert e.value.code == 2 and "already exists" in capsys.readouterr().err
+
+
+def test_unknown_task_error_is_not_wrapped_in_quotes(capsys):
+    with pytest.raises(SystemExit):
+        main(["--task", "typo"])
+    assert "error: no task 'typo'" in capsys.readouterr().err

@@ -7,14 +7,14 @@ from pathlib import Path
 import openai
 from mcp import StdioServerParameters
 
-from harness.agent import Agent
-from harness.config import load_settings
+from harness.agent import SYSTEM_PROMPT, Agent
+from harness.config import Settings, load_settings
 from harness.file_tools import MISSING_DATA_HINT, make_file_tools
 from harness.mcp_client import McpConnection, make_mcp_tools
 from harness.mcp_server import SERVER_NAME
 from harness.model import OpenAIChatModel
 from harness.sql_tools import make_sql_tools
-from harness.tools import BUILTIN_TOOLS
+from harness.tools import BUILTIN_TOOLS, Tool
 
 
 def run_repl(
@@ -70,10 +70,31 @@ def show_tool_call(name: str, arguments: str, result: str) -> None:
 
 def show_thinking(text: str) -> None:
     """Print the model's reasoning before its tool calls and answer, so the wait is not a black box."""
-    first, *rest = text.strip().splitlines()
+    lines = text.splitlines()
+    if not lines:
+        return
+    first, *rest = lines
     print(f"  [thinking] {first}")
     for line in rest:
         print(f"             {line}")
+
+
+def build_agent(
+    settings: Settings,
+    system_prompt: str = SYSTEM_PROMPT,
+    sql_tools: list[Tool] | None = None,
+    on_thinking: Callable[[str], None] | None = None,
+) -> Agent:
+    """The agent with every tool. The REPL and the evals both build it here, so the evals measure the same agent you run."""
+    if sql_tools is None:
+        sql_tools = make_sql_tools(settings.data_dir / "erp.db")
+    return Agent(
+        OpenAIChatModel(settings, on_thinking=on_thinking),
+        system_prompt,
+        tools=[*BUILTIN_TOOLS, *make_file_tools(settings.data_dir), *sql_tools],
+        max_steps=settings.max_steps,
+        context_window=settings.context_window,  # run_repl adds the on_trim notice
+    )
 
 
 def start_erp_mcp_server(db_path: Path) -> McpConnection:
@@ -104,13 +125,8 @@ def main() -> None:
         sql_tools = make_sql_tools(db_path)
         print("SQL tools: built in (set HARNESS_SQL_VIA=mcp to use the MCP server)")
 
-    agent = Agent(
-        OpenAIChatModel(settings, on_thinking=show_thinking),
-        tools=[*BUILTIN_TOOLS, *make_file_tools(settings.data_dir), *sql_tools],
-        max_steps=settings.max_steps,
-        on_tool_call=show_tool_call,
-        context_window=settings.context_window,  # run_repl adds the on_trim notice
-    )
+    agent = build_agent(settings, sql_tools=sql_tools, on_thinking=show_thinking)
+    agent.on_tool_call = show_tool_call
     try:
         run_repl(agent)
     finally:

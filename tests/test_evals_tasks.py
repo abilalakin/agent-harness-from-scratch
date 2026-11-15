@@ -9,7 +9,7 @@ from harness.evals.tasks import (
     called,
     contains,
     looked_at_every_invoice,
-    number_near,
+    number,
     paged_through_excel,
     task_by_id,
 )
@@ -22,21 +22,21 @@ def test_contains_ignores_case():
     assert not contains("112")("There are 50 invoices")
 
 
-def test_number_near_reads_numbers_the_way_people_write_them():
-    check = number_near(13701.44)
+def test_number_reads_numbers_the_way_people_write_them():
+    check = number(13701.44, tolerance=1)
     assert check("The total is 13,701.44 EUR")
-    assert check("Total: 13701 EUR")  # within the default tolerance of 1.0
+    assert check("Total: 13701 EUR")  # within the tolerance
     assert not check("Total: 13601.44 EUR")  # the database total, 100 off
     assert not check("no numbers here")
 
 
-def test_number_near_exact_when_tolerance_is_zero():
-    assert number_near(2, tolerance=0)("Rows 12 and 32 are empty, so 2 rows")
-    assert not number_near(2, tolerance=0)("Row 12 is empty")
+def test_number_is_exact_by_default():
+    assert number(2)("Rows 12 and 32 are empty, so 2 rows")
+    assert not number(2)("Row 12 is empty")
 
 
 def test_all_of_needs_every_check():
-    check = all_of(contains("Cable harness"), number_near(1990.35))
+    check = all_of(contains("Cable harness"), number(1990.35, tolerance=1))
     assert check("Cable harness at 1990.35")
     assert not check("Cable harness at 199.35")
 
@@ -101,3 +101,10 @@ def test_row_count_needs_one_read_excel_because_the_note_gives_the_total():
     # read_excel's first page says "[rows 1-30 of 56 ...]". Answering 56 from that is right, not skipped work.
     assert task_by_id("excel-row-count").trajectory([ToolCall("read_excel", "{}", "")])
     assert not task_by_id("excel-row-count").trajectory([ToolCall("run_sql", "{}", "")])
+
+
+def test_number_checks_do_not_match_digits_inside_other_numbers():
+    assert not task_by_id("unpaid-count").check("1,330 EUR across 133 invoices")
+    assert task_by_id("unpaid-count").check("33 invoices are unpaid")
+    assert not task_by_id("contract-notice").check("signed in 1990")
+    assert task_by_id("contract-penalty").check("1.5% per month")

@@ -16,7 +16,7 @@ A message is a plain dict:
 
 Two smaller lessons:
 
-- **Thinking models think out loud.** Qwen3 may start its reply with `<think>…</think>`. That text is for the model, not for you, so `strip_thinking` removes it. If the reply gets cut off mid-thought, there is an opening tag and no closing one, and the rest is dropped too.
+- **Thinking models think out loud.** Qwen3 reasons before it answers. Older Ollama versions put that inside the reply as `<think>…</think>`; newer ones return it in a separate `reasoning` field. `split_thinking` separates an inline block from the answer (a block cut off mid-thought counts as thinking too), and only the answer goes into the history. Since step 6 the CLI prints the reasoning as `[thinking]` lines through the `on_thinking` hook.
 - **Only save a turn once it worked.** `Agent.ask` builds the new list, calls the model, and saves the list only if the call succeeded. If Ollama is down, your question doesn't stay stuck in the history.
 
 ## Files to read, in order

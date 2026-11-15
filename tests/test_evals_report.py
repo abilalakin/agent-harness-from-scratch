@@ -59,3 +59,8 @@ def test_report_counts_errors_apart_from_failures():
     text = write_report(results, [T], META)
     assert "| t | 1 of 5 | - | 1 | 1000 | 10 |" not in text  # sanity: 3 runs, not 5
     assert "| t | 1 of 3 (1 error) |" in text and "**Total: 1 of 3 runs passed, 1 errored" in text
+
+
+def test_a_multi_line_failure_stays_inside_the_blockquote():
+    text = write_report([result(1, False, answer="- Net 30\n- 1.5%")], [T], META)
+    assert "> - Net 30\n> - 1.5%\n" in text

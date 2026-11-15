@@ -84,7 +84,7 @@ def run_all(
     make_agent: Callable[[], Agent],
     runs: int = 5,
     log: Callable[[str], None] = print,
-    on_result: Callable[[RunResult], None] = lambda result: None,
+    on_result: Callable[[RunResult, Task], None] = lambda result, task: None,
 ) -> list[RunResult]:
     """Every task, `runs` times each, one after the other.
 
@@ -96,7 +96,7 @@ def run_all(
         for run in range(1, runs + 1):
             result = run_task(task, make_agent, run)
             results.append(result)
-            on_result(result)
-            status = "pass" if result.passed else "FAIL"
+            on_result(result, task)
+            status = f"ERROR {result.error}" if result.error else "pass" if result.passed else "FAIL"
             log(f"{task.id} run {run}: {status} ({result.seconds:.0f}s, {len(result.calls)} tool calls)")
     return results

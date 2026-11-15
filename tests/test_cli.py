@@ -87,3 +87,8 @@ def test_repl_warns_when_the_newest_turn_alone_is_over_budget():
 def test_show_thinking_prints_it_indented(capsys):
     show_thinking("first line\nsecond line")
     assert capsys.readouterr().out == "  [thinking] first line\n             second line\n"
+
+
+def test_show_thinking_prints_nothing_for_empty_text(capsys):
+    show_thinking("")
+    assert capsys.readouterr().out == ""
