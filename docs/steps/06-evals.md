@@ -113,6 +113,10 @@ Three comparisons against the baseline:
 
 The harness version is the fourth axis, and it runs across time rather than across one afternoon: every report records its git commit, and every later step reruns the baseline and adds a row. That is how step 7 (a `run_python` tool) or step 10 (semantic search) will show whether they helped.
 
+### Results
+
+Pending. The four runs above take about four hours of GPU time and have not been run yet. When they are, the compare table goes to `docs/evals/<date>-compare.md` and a summary goes here.
+
 ### Reading the numbers
 
 The design doc's warning applies: five runs of an 8B model swing. One run in five is noise. A change counts as real when it moves several tasks the same way, or moves one task from 0 of 5 to 5 of 5. Tokens and seconds move with tool calls, so a cheaper run with the same pass count is a win too.
