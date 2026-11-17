@@ -2,7 +2,7 @@
 
 A learning project: an agent harness built by hand, one idea per step. The user reads and runs each step. The coding agent (Claude, Codex, or another) writes the code.
 
-- Design and step list: `docs/design.md`. Plans: `docs/superpowers/plans/`.
+- Design and step list: `docs/design.md`. Plans: `docs/superpowers/plans/`. Open points and ideas: `docs/backlog.md` (add a line, say where it came from).
 - Run: `uv run harness`. Test: `uv run pytest`.
 - Model: local `qwen3:8b` through Ollama's OpenAI-style API. Settings come from `HARNESS_*` env vars (`src/harness/config.py`).
 
