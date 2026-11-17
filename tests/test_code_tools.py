@@ -1,8 +1,7 @@
-import shutil
-from pathlib import Path
 
 import pytest
 from harness.code_tools import OUT_DIR, make_code_tools, run_python
+from harness.tools import run_tool_call
 
 
 def test_stdout_comes_back(tmp_path):
@@ -70,3 +69,16 @@ def test_plain_mode_can_read_the_home_folder(tmp_path):
 def test_plain_mode_can_write_outside_out(tmp_path):
     run_python(tmp_path, "open('escaped.txt', 'w').write('x')", sandbox="none")
     assert (tmp_path / "escaped.txt").exists()
+
+
+def test_unknown_sandbox_mode_fails_closed(tmp_path):
+    # A typo must never fall through to running the script unsandboxed.
+    with pytest.raises(ValueError, match="bwarp"):
+        run_python(tmp_path, "print(1)", sandbox="bwarp")
+
+
+def test_the_model_cannot_pick_the_sandbox_mode(tmp_path):
+    # The tool's only argument is `code`. A sandbox argument from the model is a bad argument, not an override.
+    (tool,) = make_code_tools(tmp_path, "bwrap")
+    call = {"function": {"name": "run_python", "arguments": '{"code": "print(1)", "sandbox": "none"}'}}
+    assert run_tool_call({"run_python": tool}, call).startswith("Error: bad arguments")

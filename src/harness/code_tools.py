@@ -15,7 +15,6 @@ import os
 import resource
 import subprocess
 import sys
-from functools import partial
 from pathlib import Path
 
 from harness.tools import MAX_TOOL_OUTPUT, Tool, cap_output
@@ -56,7 +55,13 @@ def run_python(data_dir: Path, code: str, sandbox: str = "bwrap") -> str:
     out_dir.mkdir(exist_ok=True)
     before = _snapshot(out_dir)
 
-    command = _bwrap_command(data_dir, code) if sandbox == "bwrap" else _plain_command(data_dir, code)
+    # Fail closed: only the two known modes run anything. A typo must not mean "no sandbox".
+    if sandbox == "bwrap":
+        command = _bwrap_command(data_dir, code)
+    elif sandbox == "none":
+        command = _plain_command(data_dir, code)
+    else:
+        raise ValueError(f"unknown sandbox mode {sandbox!r}: use bwrap or none")
     env = {"HOME": os.environ.get("HOME", "/tmp"), "PATH": os.environ.get("PATH", ""), **_THREAD_CAPS}
     try:
         done = subprocess.run(
@@ -94,6 +99,11 @@ def make_code_tools(data_dir: Path, sandbox: str) -> list[Tool]:
     """The run_python tool, or nothing when the sandbox setting is "off"."""
     if sandbox == "off":
         return []
+
+    def run(code: str) -> str:
+        # Only `code` is the model's to choose. The sandbox mode is bound here, where the model can't reach it.
+        return run_python(data_dir, code, sandbox)
+
     return [
         Tool(
             name="run_python",
@@ -109,6 +119,6 @@ def make_code_tools(data_dir: Path, sandbox: str) -> list[Tool]:
                 "properties": {"code": {"type": "string", "description": "The Python script to run"}},
                 "required": ["code"],
             },
-            fn=partial(run_python, data_dir, sandbox=sandbox),
+            fn=run,
         )
     ]

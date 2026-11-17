@@ -27,6 +27,7 @@ A runaway script is the most likely failure, sandbox or not:
 - **Memory.** `RLIMIT_AS` of 1 GiB, set in the child just before it starts (`preexec_fn`). A 2 GiB allocation gets a `MemoryError` in the script, not an out-of-memory kill of Ollama. pandas needs `OPENBLAS_NUM_THREADS=1` to import under that limit, so the tool sets it.
 - **No imports from the data folder.** `python -I` (isolated mode) keeps the current folder off the import path. A planted `json.py` in `data/` is never imported.
 - **A full pipe never blocks.** `capture_output=True` reads both pipes until the end; the cut happens afterwards.
+- **The model picks the script, not the mode.** The tool's only argument is `code`. The sandbox mode is bound in a closure the model cannot reach. The first version used `partial(run_python, data_dir, sandbox=sandbox)`, which left `sandbox` as an overridable keyword: the model could have sent `{"code": ..., "sandbox": "none"}` and switched the sandbox off. A security review caught it; a test now pins it. Never let a model argument reach a security setting.
 
 ### The danger
 
