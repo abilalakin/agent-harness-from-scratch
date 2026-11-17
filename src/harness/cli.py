@@ -8,6 +8,7 @@ import openai
 from mcp import StdioServerParameters
 
 from harness.agent import SYSTEM_PROMPT, Agent
+from harness.code_tools import make_code_tools
 from harness.config import Settings, load_settings
 from harness.file_tools import MISSING_DATA_HINT, make_file_tools
 from harness.mcp_client import McpConnection, make_mcp_tools
@@ -91,7 +92,12 @@ def build_agent(
     return Agent(
         OpenAIChatModel(settings, on_thinking=on_thinking),
         system_prompt,
-        tools=[*BUILTIN_TOOLS, *make_file_tools(settings.data_dir), *sql_tools],
+        tools=[
+            *BUILTIN_TOOLS,
+            *make_file_tools(settings.data_dir),
+            *sql_tools,
+            *make_code_tools(settings.data_dir, settings.sandbox),
+        ],
         max_steps=settings.max_steps,
         context_window=settings.context_window,  # run_repl adds the on_trim notice
     )
@@ -110,6 +116,8 @@ def main() -> None:
     print(f"harness: {settings.model} at {settings.base_url}. /reset clears history, /exit quits.")
     if not settings.data_dir.is_dir():
         print(MISSING_DATA_HINT)
+    if settings.sandbox == "none":
+        print("Warning: HARNESS_SANDBOX=none. Scripts the model writes run with your full rights, no sandbox.")
 
     db_path = settings.data_dir / "erp.db"
     connection = None

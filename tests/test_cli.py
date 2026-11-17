@@ -3,7 +3,8 @@ import openai
 
 from fakes import BIG, FakeModel, tool_reply
 from harness.agent import Agent
-from harness.cli import run_repl, show_thinking
+from harness.cli import build_agent, run_repl, show_thinking
+from harness.config import Settings
 from harness.context import REPLY_RESERVE
 
 
@@ -92,3 +93,8 @@ def test_show_thinking_prints_it_indented(capsys):
 def test_show_thinking_prints_nothing_for_empty_text(capsys):
     show_thinking("")
     assert capsys.readouterr().out == ""
+
+
+def test_build_agent_adds_run_python_unless_off(tmp_path):
+    assert "run_python" in build_agent(Settings(data_dir=tmp_path, sandbox="none")).tools
+    assert "run_python" not in build_agent(Settings(data_dir=tmp_path, sandbox="off")).tools

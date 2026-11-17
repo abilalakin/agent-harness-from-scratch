@@ -5,6 +5,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+SANDBOXES = ("bwrap", "none", "off")
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -22,6 +24,9 @@ class Settings:
     sql_via: str = "builtin"
     # Tokens the model can see at once. Must match OLLAMA_CONTEXT_LENGTH (see docs/steps/00-setup.md).
     context_window: int = 8192
+    # How run_python runs the model's scripts: "bwrap" (sandboxed), "none" (plain subprocess, unsafe),
+    # or "off" (no run_python tool at all).
+    sandbox: str = "bwrap"
 
 
 def _count(env: Mapping[str, str], name: str, default: int) -> int:
@@ -39,6 +44,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     sql_via = env.get("HARNESS_SQL_VIA", default.sql_via)
     if sql_via not in ("builtin", "mcp"):
         raise ValueError(f"HARNESS_SQL_VIA must be builtin or mcp, not {sql_via!r}")
+    sandbox = env.get("HARNESS_SANDBOX", default.sandbox)
+    if sandbox not in SANDBOXES:
+        raise ValueError(f"HARNESS_SANDBOX must be bwrap, none or off, not {sandbox!r}")
     return Settings(
         base_url=env.get("HARNESS_BASE_URL", default.base_url),
         model=env.get("HARNESS_MODEL", default.model),
@@ -47,4 +55,5 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         data_dir=Path(env.get("HARNESS_DATA_DIR", default.data_dir)),
         sql_via=sql_via,
         context_window=_count(env, "HARNESS_CONTEXT_WINDOW", default.context_window),
+        sandbox=sandbox,
     )

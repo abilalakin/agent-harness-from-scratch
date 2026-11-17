@@ -47,3 +47,10 @@ def test_context_window_default_and_override():
 def test_counts_must_be_whole_numbers_of_at_least_one(name, value):
     with pytest.raises(ValueError, match="whole number of 1 or more"):
         load_settings({name: value})
+
+
+def test_sandbox_setting_validated():
+    assert load_settings({}).sandbox == "bwrap"
+    assert load_settings({"HARNESS_SANDBOX": "none"}).sandbox == "none"
+    with pytest.raises(ValueError, match="bwrap, none or off"):
+        load_settings({"HARNESS_SANDBOX": "podman"})
