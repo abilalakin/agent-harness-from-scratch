@@ -49,12 +49,13 @@ def python_roots() -> list[Path]:
     return roots
 
 
-def _check_narrow(root: Path, data: Path) -> None:
-    """Refuse a root that would expose the home folder, the data folder or the whole disk."""
+def check_python_root(root: Path, data: Path) -> None:
+    """Only a folder that is a Python install may be mounted, and never one above the home or data folder."""
     home = Path.home()
-    too_broad = root in (Path("/"), Path("/home"), home) or root in home.parents or root in data.parents
-    if too_broad:
+    if root in (Path("/"), Path("/home"), home) or root in home.parents or root in data.parents:
         raise SandboxError(f"refusing to mount {root} into the sandbox")
+    if not any(p.name.startswith("python") and (p / "os.py").is_file() for p in (root / "lib").glob("python*")):
+        raise SandboxError(f"{root} is not a Python install (no lib/pythonX.Y/os.py)")
 
 
 def _limit_memory() -> None:
@@ -74,7 +75,7 @@ def _bwrap_command(data_dir: Path, code: str) -> list[str]:
     data = data_dir.resolve()
     roots = python_roots()
     for root in roots:
-        _check_narrow(root, data)
+        check_python_root(root, data)
     # A symlink per data entry, so both legacy/x.xlsx and data/legacy/x.xlsx work. Models write both.
     links = [arg for entry in data.iterdir() for arg in ("--symlink", f"data/{entry.name}", f"/sandbox/{entry.name}")]
     return [

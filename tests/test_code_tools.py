@@ -3,7 +3,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from harness.code_tools import OUT_DIR, make_code_tools, python_roots, run_python
+from harness.code_tools import OUT_DIR, SandboxError, check_python_root, make_code_tools, python_roots, run_python
 from harness.practice_data import make_all
 from harness.tools import run_tool_call
 
@@ -176,3 +176,15 @@ def test_a_symlinked_out_folder_is_refused(tmp_path):
     (tmp_path / "out").symlink_to(elsewhere)
     out = run_python(tmp_path, "open('out/x.txt', 'w').write('x')", sandbox="none")
     assert out.startswith("Error: data/out is a symlink") and not (elsewhere / "x.txt").exists()
+
+
+def test_only_a_real_python_install_passes_the_root_check(tmp_path):
+    data = tmp_path / "data"
+    fake = tmp_path / "python"
+    with pytest.raises(SandboxError, match="not a Python install"):
+        check_python_root(fake, data)  # no lib/pythonX.Y/os.py inside
+    (fake / "lib" / "python3.12").mkdir(parents=True)
+    (fake / "lib" / "python3.12" / "os.py").write_text("")
+    check_python_root(fake, data)  # a real-looking install is fine
+    with pytest.raises(SandboxError, match="refusing to mount"):
+        check_python_root(tmp_path, data)  # above the data folder, even if it had a python
