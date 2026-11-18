@@ -22,10 +22,12 @@ Open points, ideas and small findings that are not part of the current step. Add
 - **Keyword search misses rephrasings.** `contract-notice` 1 of 5, `contract-penalty` 3 of 5 with the trajectory fine: "notice period" does not match "90 days written notice". Step 10 (semantic search) is the planned answer; these two tasks are the number to beat. (First baseline, 2026-11-13.)
 - **The model answers from the wrong source.** Both Excel tasks 0 of 5: it queried the database for a table named after the file and never called `list_files`. Step 7's `run_python` and a better prompt are the candidates; the strict-prompt run (pending) will say. (First baseline.)
 - **The step 5 fake, counted.** `invoice-mismatch` 4 of 5 with one run reading two PDFs and claiming five. Trajectory checks catch it; what reduces it is open (prompt, a script over all five, a bigger model). (First baseline.)
+- **With `run_python`, the failures move from skipped work to script mistakes.** `excel-empty-rows` with the tool: the model runs a script every time, finds the right column after one error, then checks `== ''`; empty cells are `NaN` in pandas, so it prints 0 and answers "0 rows" (1 of 5). `excel-row-count`: pandas gives 55 data rows and the model reports "55 including the header". Honest work, wrong answers. Options: a hint in the tool description ("empty cells are NaN; use isna()"), a scratch step where the script prints a sample before counting, or a better model. Measure before and after. (Step 7 measurement, 2026-11-18.)
 - **The judge sees the rubric, not the agreement.** It fails a true clause that is not in the rubric for the same reason as an invented one. Giving the judge the source text would let it tell them apart, at the cost of a longer judge prompt. (Step 6c.)
 
 ## Pending work
 
+- **Step 7 measurement, second half.** 17 of 25 "with tool" runs are in `logs/evals/2026-11-18-step7-with-tool.jsonl`. Still to run, from a terminal: `invoice-mismatch` and `unpaid-count` with the tool (label `step7-with-tool-part2`), then all five tasks with `HARNESS_SANDBOX=off` (label `step7-without-tool`). Then merge the two "with tool" logs, `--compare`, and write the 7c section of `docs/steps/07-sandbox.md`.
 - **Step 6 benchmark runs.** Baseline, `qwen3:4b`, strict prompt and a 3500-token window, about four hours of GPU, then the compare table and the "Results" part of `docs/steps/06-evals.md`. The command chain is in that note under 6d.
 
 ## Small things, deferred from reviews
