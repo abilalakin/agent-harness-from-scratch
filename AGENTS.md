@@ -13,6 +13,7 @@ A learning project: an agent harness built by hand, one idea per step. The user 
 - Tests use `tests/fakes.py::FakeModel`, so they are free, fast and offline.
 - Every step updates `docs/architecture.md` (Mermaid diagram) and adds a note in `docs/steps/NN-name.md`: what the step teaches, which files to read in order, what to try.
 - Keep each step readable in one sitting. Pick the plain, obvious code over the clever one.
+- Comments: short and simple. One plain sentence that says why. Long comments, buzzwords and heavy punctuation make the code unreadable.
 - When a step's tasks are done: a review pass for bugs (medium depth), fix what it finds, then a simplification pass. Commit that as its own commit before moving to the next step.
 - Commits: at a commit point, show the changed files and the message, wait for the user's OK, then commit. Commits are signed with the personal key set in `.git/config`; leave the global git config alone.
 
