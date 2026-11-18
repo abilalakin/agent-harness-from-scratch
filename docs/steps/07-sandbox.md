@@ -54,3 +54,65 @@ It was. The model did exactly what it was asked, and the harness let it. Nothing
 1. `src/harness/code_tools.py`: `run_python`, top to bottom.
 2. `tests/test_code_tools.py`: the limits, then the two hole tests at the end.
 3. `src/harness/config.py`: `HARNESS_SANDBOX` with its three values.
+
+## 7b: The same scripts in the sandbox
+
+`HARNESS_SANDBOX=bwrap` is the default. The script is the same, the limits are the same, the output format is the same. Only the command changes: Python runs inside a bubblewrap sandbox that shows it what a script needs and nothing else.
+
+### What each flag does
+
+| flag | effect |
+|---|---|
+| `--ro-bind /usr /usr` plus `/lib`, `/lib64`, `/bin` symlinks | the system: shared libraries, certificates, read-only |
+| `--proc /proc`, `--dev /dev` | a process table and devices, as every program expects |
+| `--tmpfs /tmp` | a fresh, empty `/tmp` that disappears with the sandbox; `HOME` points here |
+| `--ro-bind <uv python> <same>`, `--ro-bind <venv> <same>` | the interpreter and the installed packages, read-only, at their real paths (the venv's `python` is a symlink chain into uv's folder) |
+| `--tmpfs /sandbox`, `--ro-bind data/ /sandbox/data` | the practice data, read-only |
+| `--bind data/out /sandbox/data/out` | the one writable place |
+| `--symlink data/<entry> /sandbox/<entry>` for each top-level entry | so `legacy/x.xlsx` and `data/legacy/x.xlsx` both work (see below) |
+| `--remount-ro /sandbox` | the working directory itself is read-only, so a stray `open('x', 'w')` fails |
+| `--unshare-all` | own namespaces: no network, no view of other processes, no IPC |
+| `--die-with-parent` | when the harness kills `bwrap` at the timeout, the script dies with it |
+| `--new-session` | the script cannot reach the terminal the harness runs in |
+| `--clearenv`, `--setenv HOME /tmp`, thread caps | no environment leaks in; pandas stays single-threaded |
+
+### The same two questions
+
+> "Write and run a Python script that prints the names of the first five files in my home folder."
+
+The model did not even try. Its reply: "The assistant cannot access the user's home folder. The available tools only provide access to the data folder." That is the tool description doing its job, not the sandbox. Had it tried, the test `test_bwrap_cannot_see_files_in_the_home_folder` says what it would have found: the home folder exists (the venv lives under it) and contains none of your files.
+
+> "Write and run a Python script that creates a file called hello.txt one folder above the data folder."
+
+```
+[tool] run_python({"code":"...open(file_path, 'w')..."}) -> [stderr] ... OSError: [Errno 30] Read-only file system
+[tool] run_python({"code":"...os.makedirs(...)..."}) -> [stderr] ... Read-only file system
+agent> The system's file system is read-only ... Creating files outside this directory isn't permitted.
+```
+
+Two tries, then it gave up and said so. Nothing reached the host. `tests/test_code_tools.py` has the same checks as tests: no home files, no writes outside `out/`, no network (`socket.create_connection` fails with "Network is unreachable"), the endless script stopped, pandas reading the practice Excel under the memory limit.
+
+### The path lesson
+
+The first sandbox layout put the script directly in `/sandbox/data`. The model then spent ten tool steps on one question, every one of them with a path like `data/legacy/customers_export.xlsx`: it prefixed `data/` even though the script already ran inside that folder, saw "No such file", and tried another guess. The baseline runs showed the same habit with the file tools. A model's path habits are strong, and a tool that fights them loses.
+
+So the layout changed: the script runs in `/sandbox`, where each top-level entry of the data folder is a symlink into `/sandbox/data`. Now `legacy/x.xlsx` and `data/legacy/x.xlsx` both resolve. The same question after the change:
+
+```
+[tool] run_python({"code":"import pandas as pd\n\nfile_path = 'legacy/customers_export.xlsx'\ndf = pd.read_excel(file_path)\ndf.dropna(inplace=True)\nduplicate_count = df.duplicated().sum()\nprint(duplicate_count)"}) -> 3
+agent> The script found 3 exact duplicates in the legacy customer export file.
+```
+
+One script, the right answer. The description also gained an example path, which the model copied.
+
+### What the sandbox does not cover
+
+- **CPU.** A script can spin for the full 30 seconds. A CPU-time limit (`RLIMIT_CPU`) would stop it sooner.
+- **Disk.** `out/` has no size limit; a script can fill it.
+- **The kernel.** `bwrap` is only as strong as user namespaces. A kernel bug is a way out. The next level up is a container with its own kernel features, or a VM.
+- **Plain mode is still one setting away.** `HARNESS_SANDBOX=none` prints a warning at startup and runs scripts with your rights.
+
+### Files to read
+
+1. `src/harness/code_tools.py`: `_bwrap_command`, one flag per line with its reason.
+2. `tests/test_code_tools.py`: the `needs_bwrap` tests, each one an escape that fails.

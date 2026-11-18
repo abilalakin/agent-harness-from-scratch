@@ -1,6 +1,10 @@
 
+import shutil
+from pathlib import Path
+
 import pytest
 from harness.code_tools import OUT_DIR, make_code_tools, run_python
+from harness.practice_data import make_all
 from harness.tools import run_tool_call
 
 
@@ -82,3 +86,72 @@ def test_the_model_cannot_pick_the_sandbox_mode(tmp_path):
     (tool,) = make_code_tools(tmp_path, "bwrap")
     call = {"function": {"name": "run_python", "arguments": '{"code": "print(1)", "sandbox": "none"}'}}
     assert run_tool_call({"run_python": tool}, call).startswith("Error: bad arguments")
+
+
+# --- Inside the sandbox ------------------------------------------------------
+
+needs_bwrap = pytest.mark.skipif(shutil.which("bwrap") is None, reason="bwrap not installed")
+
+
+@needs_bwrap
+def test_bwrap_runs_a_script_with_the_same_result(tmp_path):
+    (tmp_path / "a.txt").write_text("hello")
+    assert run_python(tmp_path, "print(open('a.txt').read())") == "hello\n"
+
+
+@needs_bwrap
+def test_bwrap_cannot_see_files_in_the_home_folder(tmp_path):
+    # The home folder itself exists inside (the venv lives under it), but none of its files do.
+    real_file = next(p for p in Path.home().iterdir() if p.is_file())
+    out = run_python(tmp_path, f"import os; print(os.path.exists({str(real_file)!r}), len(os.listdir({str(Path.home())!r})))")
+    assert out.startswith("False ")
+
+
+@needs_bwrap
+def test_bwrap_accepts_the_data_prefix_too(tmp_path):
+    # Models often write data/legacy/x.xlsx even though the script already runs inside the data folder.
+    (tmp_path / "legacy").mkdir()
+    (tmp_path / "legacy" / "a.txt").write_text("hello")
+    code = "print(open('legacy/a.txt').read(), open('data/legacy/a.txt').read())"
+    assert run_python(tmp_path, code) == "hello hello\n"
+
+
+@needs_bwrap
+def test_bwrap_cannot_write_outside_out(tmp_path):
+    out = run_python(tmp_path, "open('escaped.txt', 'w').write('x')")
+    assert "Read-only file system" in out and not (tmp_path / "escaped.txt").exists()
+
+
+@needs_bwrap
+def test_bwrap_writes_to_out_arrive_on_the_host(tmp_path):
+    out = run_python(tmp_path, "open('out/r.txt', 'w').write('x')")
+    assert "[wrote out/r.txt" in out and (tmp_path / "out" / "r.txt").read_text() == "x"
+
+
+@needs_bwrap
+def test_bwrap_has_no_network(tmp_path):
+    code = (
+        "import socket\n"
+        "try: socket.create_connection(('1.1.1.1', 53), timeout=2); print('connected')\n"
+        "except OSError as e: print('refused', e.errno)"
+    )
+    assert run_python(tmp_path, code) == "refused 101\n"
+
+
+@needs_bwrap
+def test_bwrap_endless_script_is_stopped(tmp_path, monkeypatch):
+    monkeypatch.setattr("harness.code_tools.TIMEOUT_SECONDS", 1)
+    assert run_python(tmp_path, "while True: pass").startswith("Error: the script ran longer")
+
+
+@needs_bwrap
+def test_bwrap_pandas_reads_the_practice_excel(tmp_path):
+    make_all(tmp_path)
+    out = run_python(tmp_path, "import pandas; print(len(pandas.read_excel('legacy/customers_export.xlsx')))")
+    assert out == "55\n"
+
+
+def test_missing_bwrap_gives_a_clear_error(tmp_path, monkeypatch):
+    monkeypatch.setattr("harness.code_tools.BWRAP", "/nonexistent/bwrap")
+    out = run_python(tmp_path, "print(1)")
+    assert out.startswith("Error: the sandbox could not start") and "HARNESS_SANDBOX=none" in out
