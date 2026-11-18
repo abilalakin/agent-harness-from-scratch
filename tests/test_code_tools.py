@@ -3,7 +3,7 @@ import shutil
 from pathlib import Path
 
 import pytest
-from harness.code_tools import OUT_DIR, make_code_tools, run_python
+from harness.code_tools import OUT_DIR, make_code_tools, python_roots, run_python
 from harness.practice_data import make_all
 from harness.tools import run_tool_call
 
@@ -155,3 +155,24 @@ def test_missing_bwrap_gives_a_clear_error(tmp_path, monkeypatch):
     monkeypatch.setattr("harness.code_tools.BWRAP", "/nonexistent/bwrap")
     out = run_python(tmp_path, "print(1)")
     assert out.startswith("Error: the sandbox could not start") and "HARNESS_SANDBOX=none" in out
+
+
+def test_python_roots_follow_the_symlink_chain_and_stay_narrow():
+    # Every root is a real Python install (has bin/ and lib/), none is the home folder or above it.
+    roots = python_roots()
+    assert roots and all((r / "bin").is_dir() and (r / "lib").is_dir() for r in roots)
+    assert all(r != Path.home() and r not in Path.home().parents for r in roots)
+
+
+def test_a_too_broad_python_root_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr("harness.code_tools.python_roots", lambda: [Path.home()])
+    out = run_python(tmp_path, "print(1)")
+    assert out.startswith("Error: the sandbox could not start: refusing to mount")
+
+
+def test_a_symlinked_out_folder_is_refused(tmp_path):
+    elsewhere = tmp_path.parent / "elsewhere"
+    elsewhere.mkdir(exist_ok=True)
+    (tmp_path / "out").symlink_to(elsewhere)
+    out = run_python(tmp_path, "open('out/x.txt', 'w').write('x')", sandbox="none")
+    assert out.startswith("Error: data/out is a symlink") and not (elsewhere / "x.txt").exists()

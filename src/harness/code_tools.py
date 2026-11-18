@@ -22,6 +22,41 @@ BWRAP = "bwrap"
 _THREAD_CAPS = {"OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1"}
 
 
+class SandboxError(Exception):
+    """The sandbox cannot be set up safely."""
+
+
+def python_roots() -> list[Path]:
+    """The Python installs behind the venv's interpreter, following every symlink.
+
+    A venv's python is a symlink, often into an alias folder that is itself a link to the real
+    install. Each install root on that chain is mounted read-only, and nothing wider.
+    """
+    venv, usr = Path(sys.prefix), Path("/usr")
+    roots: list[Path] = []
+    path = Path(sys.executable)
+    seen = set()
+    while path.is_symlink() and path not in seen:
+        seen.add(path)
+        target = path.readlink()
+        path = target if target.is_absolute() else path.parent / target
+        root = path.parent.parent  # <root>/bin/pythonX.Y
+        if root not in (venv, usr) and venv not in root.parents and usr not in root.parents and root not in roots:
+            roots.append(root)
+    base = Path(sys.base_prefix)
+    if base not in roots and base != usr and usr not in base.parents:
+        roots.append(base)
+    return roots
+
+
+def _check_narrow(root: Path, data: Path) -> None:
+    """Refuse a root that would expose the home folder, the data folder or the whole disk."""
+    home = Path.home()
+    too_broad = root in (Path("/"), Path("/home"), home) or root in home.parents or root in data.parents
+    if too_broad:
+        raise SandboxError(f"refusing to mount {root} into the sandbox")
+
+
 def _limit_memory() -> None:
     """Runs in the child just before the script starts."""
     resource.setrlimit(resource.RLIMIT_AS, (MEMORY_LIMIT_BYTES, MEMORY_LIMIT_BYTES))
@@ -35,9 +70,11 @@ def _plain_command(data_dir: Path, code: str) -> list[str]:
 def _bwrap_command(data_dir: Path, code: str) -> list[str]:
     """The same Python call, inside a bubblewrap sandbox. See docs/steps/07-sandbox.md for each flag."""
     python = Path(sys.executable)
-    python_root = python.resolve().parents[2]  # the venv's python is a symlink into uv's Python folder
     venv = Path(sys.prefix)
     data = data_dir.resolve()
+    roots = python_roots()
+    for root in roots:
+        _check_narrow(root, data)
     # A symlink per data entry, so both legacy/x.xlsx and data/legacy/x.xlsx work. Models write both.
     links = [arg for entry in data.iterdir() for arg in ("--symlink", f"data/{entry.name}", f"/sandbox/{entry.name}")]
     return [
@@ -49,7 +86,7 @@ def _bwrap_command(data_dir: Path, code: str) -> list[str]:
         "--proc", "/proc",
         "--dev", "/dev",
         "--tmpfs", "/tmp",  # fresh and empty, gone after the run
-        "--ro-bind", str(python_root), str(python_root),
+        *(arg for root in roots for arg in ("--ro-bind", str(root), str(root))),
         "--ro-bind", str(venv), str(venv),
         "--tmpfs", "/sandbox",
         "--ro-bind", str(data), "/sandbox/data",
@@ -83,16 +120,21 @@ def _snapshot(out_dir: Path) -> dict[str, tuple[float, int]]:
 def run_python(data_dir: Path, code: str, sandbox: str = "bwrap") -> str:
     """Run `code` with the data folder as its working directory. Returns what it printed and wrote."""
     out_dir = data_dir / OUT_DIR
+    if out_dir.is_symlink():  # a link would make the writable bind point somewhere else
+        return f"Error: data/{OUT_DIR} is a symlink. Make it a real folder."
     out_dir.mkdir(exist_ok=True)
     before = _snapshot(out_dir)
 
     # Fail closed: a typo must not mean "no sandbox".
-    if sandbox == "bwrap":
-        command = _bwrap_command(data_dir, code)
-    elif sandbox == "none":
-        command = _plain_command(data_dir, code)
-    else:
-        raise ValueError(f"unknown sandbox mode {sandbox!r}: use bwrap or none")
+    try:
+        if sandbox == "bwrap":
+            command = _bwrap_command(data_dir, code)
+        elif sandbox == "none":
+            command = _plain_command(data_dir, code)
+        else:
+            raise ValueError(f"unknown sandbox mode {sandbox!r}: use bwrap or none")
+    except SandboxError as e:
+        return _sandbox_error(str(e))
     env = {"HOME": os.environ.get("HOME", "/tmp"), "PATH": os.environ.get("PATH", ""), **_THREAD_CAPS}
     try:
         done = subprocess.run(

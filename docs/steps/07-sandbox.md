@@ -66,9 +66,9 @@ It was. The model did exactly what it was asked, and the harness let it. Nothing
 | `--ro-bind /usr /usr` plus `/lib`, `/lib64`, `/bin` symlinks | the system: shared libraries, certificates, read-only |
 | `--proc /proc`, `--dev /dev` | a process table and devices, as every program expects |
 | `--tmpfs /tmp` | a fresh, empty `/tmp` that disappears with the sandbox; `HOME` points here |
-| `--ro-bind <uv python> <same>`, `--ro-bind <venv> <same>` | the interpreter and the installed packages, read-only, at their real paths (the venv's `python` is a symlink chain into uv's folder) |
+| `--ro-bind <python install> <same>` per install root, `--ro-bind <venv> <same>` | the interpreter and the installed packages, read-only, at their real paths. `python_roots()` follows the venv's symlink chain (here: uv's alias folder, then the real install) and mounts only those roots. A root that would be the home folder, or above it, is refused: a review found that the first version guessed the root by counting parent folders, which on another layout could have mounted the whole home folder |
 | `--tmpfs /sandbox`, `--ro-bind data/ /sandbox/data` | the practice data, read-only |
-| `--bind data/out /sandbox/data/out` | the one writable place |
+| `--bind data/out /sandbox/data/out` | the one writable place. Refused if `data/out` is a symlink, since the bind would follow it |
 | `--symlink data/<entry> /sandbox/<entry>` for each top-level entry | so `legacy/x.xlsx` and `data/legacy/x.xlsx` both work (see below) |
 | `--remount-ro /sandbox` | the working directory itself is read-only, so a stray `open('x', 'w')` fails |
 | `--unshare-all` | own namespaces: no network, no view of other processes, no IPC |
