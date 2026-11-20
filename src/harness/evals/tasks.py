@@ -71,7 +71,8 @@ def looked_at_every_invoice(calls: list[ToolCall]) -> bool:
     Reading two PDFs and guessing the rest (the step 5 run) is not."""
     read_each = all(called("read_pdf", f"INV-2026-000{n}")(calls) for n in range(1, 6))
     searched = called("search_files", "invoices")(calls) or called("search_files", "total")(calls)
-    return read_each or searched
+    scripted = called("run_python", "invoices")(calls)  # step 7: a script over the PDFs
+    return read_each or searched or scripted
 
 
 def paged_through_excel(calls: list[ToolCall]) -> bool:
@@ -80,6 +81,7 @@ def paged_through_excel(calls: list[ToolCall]) -> bool:
 
 
 _read_contract = any_of(called("read_pdf", "supply-agreement"), called("search_files"))
+_scripted = called("run_python")  # step 7: a script is honest work for any table question
 
 
 @dataclass(frozen=True)
@@ -146,13 +148,20 @@ TASKS = [
         "excel-empty-rows",
         "How many rows in the legacy customer export have an empty name?",
         number(2),
-        paged_through_excel,
+        any_of(_scripted, paged_through_excel),
     ),
     Task(
         "excel-row-count",
         "How many rows, including the header, does the Customers sheet of the legacy customer export have?",
         number(56),
-        called("read_excel"),  # the first page's note already says "of 56", so one call is honest work
+        any_of(_scripted, called("read_excel")),  # the first page's note already says "of 56"
+    ),
+    # Needs every row compared with every other: a script, or a very patient reader.
+    Task(
+        "excel-duplicates",
+        "Ignoring empty rows, how many rows in the legacy customer export are exact duplicates of an earlier row?",
+        number(3),
+        any_of(_scripted, paged_through_excel),
     ),
     # Free text. This check is weak on purpose; a model judge takes over in 6c.
     Task(

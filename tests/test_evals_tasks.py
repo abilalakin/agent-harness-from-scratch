@@ -1,5 +1,7 @@
 import sqlite3
 
+import openpyxl
+
 import pytest
 
 from harness.evals.tasks import (
@@ -42,7 +44,7 @@ def test_all_of_needs_every_check():
 
 
 def test_task_ids_are_unique_and_lookup_names_the_known_ids():
-    assert len({t.id for t in TASKS}) == len(TASKS) == 12
+    assert len({t.id for t in TASKS}) == len(TASKS) == 13
     with pytest.raises(KeyError, match="invoice-count"):
         task_by_id("typo")
 
@@ -108,3 +110,24 @@ def test_number_checks_do_not_match_digits_inside_other_numbers():
     assert task_by_id("unpaid-count").check("33 invoices are unpaid")
     assert not task_by_id("contract-notice").check("signed in 1990")
     assert task_by_id("contract-penalty").check("1.5% per month")
+
+
+# --- Step 7: a script counts as honest work -----------------------------------
+
+
+def test_a_script_over_the_invoices_counts_as_looking_at_every_invoice():
+    call = ToolCall("run_python", '{"code": "for p in Path(\'invoices\').glob(\'*.pdf\'): ..."}', "")
+    assert looked_at_every_invoice([call])
+
+
+def test_excel_tasks_accept_a_script():
+    script = [ToolCall("run_python", '{"code": "import pandas"}', "")]
+    assert all(task_by_id(id).trajectory(script) for id in ("excel-duplicates", "excel-empty-rows", "excel-row-count"))
+
+
+def test_duplicate_count_matches_the_generated_data(tmp_path):
+    make_all(tmp_path)
+    sheet = openpyxl.load_workbook(tmp_path / "legacy/customers_export.xlsx").active
+    rows = [r for r in sheet.iter_rows(min_row=2, values_only=True) if any(r)]
+    assert len(rows) - len(set(rows)) == 3
+    assert len(TASKS) == 13
