@@ -27,6 +27,7 @@ uv run make-data     # fake practice data in data/
 uv run harness       # chat; type /exit to quit
 uv run pytest        # offline tests, no model needed
 uv run evals         # the eval set against the real model, about an hour; --runs 1 --task invoice-count for a quick one
+HARNESS_SANDBOX=none uv run harness   # run the model's scripts without the sandbox (step 7a, unsafe)
 ```
 
 Needs Python 3.12+, [uv](https://docs.astral.sh/uv/), and [Ollama](https://ollama.com) with `qwen3:8b` pulled (see `docs/steps/00-setup.md`).

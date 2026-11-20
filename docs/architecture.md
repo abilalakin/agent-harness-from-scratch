@@ -16,6 +16,13 @@ flowchart LR
     Runner --> T2[calculate]
     Runner --> FT["file tools<br/>list_files, read_text, read_pdf,<br/>read_excel (30 rows a page),<br/>search_files (matching lines only)"]
     FT -- "safe_path:<br/>inside data/ only" --> Data
+    Runner -- "HARNESS_SANDBOX=bwrap<br/>(default)" --> RP["run_python<br/>30 s, 1 GiB, python -I"]
+    RP --> Bwrap
+    subgraph Bwrap["bwrap sandbox (code_tools.py, step 7)"]
+        Script["the model's script<br/>/usr, venv: read-only<br/>data/: read-only<br/>data/out/: writable<br/>no network, no home, fresh /tmp"]
+    end
+    Script -. "stdout, stderr, exit code,<br/>[wrote out/...] lines" .-> RP
+    Script -- reads --> Data
     Runner -- "HARNESS_SQL_VIA=builtin<br/>(default)" --> ST["SQL tools<br/>describe_tables, run_sql<br/>max 50 rows"]
     Runner -- "HARNESS_SQL_VIA=mcp" --> MT["MCP tools<br/>mcp__erp__describe_tables,<br/>mcp__erp__run_sql"]
     MT --> Conn["McpConnection<br/>background thread,<br/>asyncio loop"]
@@ -50,6 +57,8 @@ The file tools read the files in `data/`. The SQL tools read `erp.db`, and the d
 
 The agent loops between the model and the tools until the model answers without asking for a tool, or until `max_steps` model calls are used up.
 
+`run_python` runs a script the model wrote, as a separate process. By default the process lives in a bubblewrap sandbox that shows it the data folder read-only, one writable folder for results, and no network. `HARNESS_SANDBOX=none` runs it without the sandbox (for the step 7 lesson), `off` removes the tool.
+
 The evals sit on top of all of this and change none of it. The runner builds the same agent the CLI builds, asks each question N times on a fresh agent, and measures from the outside: tool calls through the `on_tool_call` hook, tokens by wrapping the model.
 
 ## What changed
@@ -67,3 +76,4 @@ The evals sit on top of all of this and change none of it. The runner builds the
 - **Step 5c:** `search_files` finds a word across text, PDF and Excel files and returns only the matching lines, each with its file and page or row. The model can search five PDFs in one call instead of reading them one by one.
 - **Step 5d:** `context.py` estimates the size of each request (characters ÷ 4) and trims it to fit before every model call: old tool results become one-line stubs, then whole old turns are dropped. The newest turn and the system prompt always stay. The CLI shows `[context ~N of 8192 tokens]` after each answer.
 - **Step 6:** Evals. `uv run evals` runs twelve questions over the practice data N times each and writes a report: `4 of 5` per task, a trajectory column for what the agent did (did it read all five PDFs?), errors counted apart from wrong answers, and the first failed answer quoted. A model judge grades the free-text task against a rubric, and is checked against six hand-graded answers first. `--compare` puts several runs side by side, one variable per run: model, prompt, context window, commit.
+- **Step 7:** `run_python`. The model writes a short script; the harness runs it with the data folder as its working directory, under a 30-second and 1 GiB limit, and returns what it printed and wrote to `data/out/`. 7a ran it as a plain subprocess and showed the script listing the home folder and writing outside the data folder. 7b runs it inside `bwrap`: `/usr`, the venv and `data/` read-only, `data/out/` writable, no network, no home. The same scripts now fail. The model cannot choose the mode: the tool's only argument is the code.
